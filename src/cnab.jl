@@ -120,7 +120,7 @@ function initial_sol(backend, body::AbstractStaticBody, sol_args, coupler_args)
     sol0 = CNAB(; sol_args..., coupler=NothingCoupler())
 
     init_body_points!(sol0.points, body)
-    init_reg!(sol0, body, eachindex(sol0.points.x))
+    update_weights!(sol0.reg, sol0.prob.grid, sol0.points.x, eachindex(sol0.points.x))
     Binv = B_inverse_rigid(sol0)
 
     coupler = PrescribedBodyCoupler(Binv; coupler_args...)
@@ -144,10 +144,9 @@ function initial_sol(
     i_prescribed = prescribed_point_range(body)
 
     init_body_points!(view(sol.points, i_prescribed), body.prescribed)
-    init_reg!(sol, body.prescribed, prescribed_point_range(body))
     update_structure!(sol.points, coupler.state, body, coupler.ops, sol.i, sol.t)
     init_structure_operators!(coupler.ops, body, sol.points, coupler.state, sol.dt)
-    update_weights!(sol.reg, sol.prob.grid, sol.points.x, i_deform)
+    update_weights!(sol.reg, sol.prob.grid, sol.points.x, eachindex(sol.points.x))
     update_redist_weights!(sol)
 
     sol
@@ -192,12 +191,7 @@ function step!(sol::CNAB)
     sol
 end
 
-function init_reg!(sol::CNAB, ::AbstractStaticBody, i)
-    update_weights!(sol.reg, sol.prob.grid, sol.points.x, i)
-end
 update_reg!(::CNAB, ::AbstractStaticBody, _) = nothing
-
-init_reg!(::CNAB, ::AbstractPrescribedBody, _) = nothing
 function update_reg!(sol::CNAB, ::AbstractPrescribedBody, i)
     update_weights!(sol.reg, sol.prob.grid, sol.points.x, i)
 end
