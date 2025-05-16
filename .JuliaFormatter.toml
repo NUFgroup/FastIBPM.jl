@@ -1,0 +1,6 @@
+# See https://domluna.github.io/JuliaFormatter.jl/stable/ for a list of options
+style = "blue"
+import_to_using = false
+always_use_return = false
+whitespace_ops_in_indices = false
+pipe_to_function_call = false

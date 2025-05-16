@@ -1,0 +1,13 @@
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+Manifest.toml
+/docs/build/
+
+*.gif
+*.pdf
+*.jld2
+*.h5
+
+.ipynb_checkpoints
+*.ipynb
