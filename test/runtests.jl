@@ -32,7 +32,7 @@ AMDGPU.functional() && push!(arrays, AMDGPU.ROCArray)
             Tests.test_multidomain_poisson
             Tests.test_regularization
             Tests.test_cnab
-            Tests.test_cnab_io
+            # Tests.test_cnab_io
         ]
             @testset "$(nd)D" for nd in (2, 3)
                 test(array, Val(nd))

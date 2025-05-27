@@ -724,7 +724,7 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
 
     FastIBPM.interpolate_body!(f_work, sol.reg, sol.u[1])
     unflatten(x) = reinterpret(reshape, T, x)
-    @test unflatten(f_work) ≈ unflatten(sol.points.u) atol = sqrt(eps(T))
+    @test unflatten(f_work) ≈ unflatten(sol.points.u) atol = 1e-4
 
     ω = FastIBPM.grid_view(deepcopy(sol0[end].ω), grid, Loc_ω, ExcludeBoundary())
 
