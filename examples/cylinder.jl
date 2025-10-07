@@ -107,12 +107,12 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=100.0, snapshot_freq=100)
+        solution(file; tf=10.0, snapshot_freq=100)
     end
 end
 
 output_path = joinpath(@__DIR__,  "figures")
-
+mkdir(output_path; recursive=true)
 
 # %%
 # Using Plots to visualize the vorticity field and save as an animation
@@ -149,7 +149,7 @@ h5open(soln_path, "r") do file
         frame(anim, p)
     end
 
-    gif(anim, joinpath(output_path, "vorticity.gif"), fps=30)
+    gif(anim, joinpath(output_path, "cylinder_vorticity.gif"), fps=30)
 end
 
 # %%
@@ -242,7 +242,7 @@ for f in (:Cl, :Cd)
     hline!(p, [μ - A, μ + A]; color=col, linestyle=:dash, label="")
 end
 
-savefig(p, joinpath(output_path, "Cl_Cd.png"))
+savefig(p, joinpath(output_path, "cylinder_Cl_Cd.png"))
 
 # %%    
 # Using Makie to visualize lift and drag coefficients with peaks and oscillation bands
