@@ -72,8 +72,8 @@ function solution(file; tf, snapshot_freq)
 
     all_group = create_group(file, "all")
     t_all = create_dataset(all_group, "t", T, (n_all,))
-    CL = create_dataset(all_group, "CL", T, (n_all,))
-    CD = create_dataset(all_group, "CD", T, (n_all,))
+    Cl = create_dataset(all_group, "Cl", T, (n_all,))
+    Cd = create_dataset(all_group, "Cd", T, (n_all,))
 
     snapshot_group = create_group(file, "snapshots")
     t_snapshot = create_dataset(snapshot_group, "t", T, (n_snapshot,))
@@ -87,8 +87,8 @@ function solution(file; tf, snapshot_freq)
 
         f = surface_force_sum(sol)
         t_all[sol.i] = sol.t
-        CD[sol.i] = 2 * f[1]
-        CL[sol.i] = 2 * f[2]
+        Cd[sol.i] = 2 * f[1]
+        Cl[sol.i] = 2 * f[2]
 
         if sol.i in i_snapshot
             i = 1 + (sol.i - first(i_snapshot)) ÷ step(i_snapshot)
@@ -107,7 +107,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=20.0, snapshot_freq=100)
+        solution(file; tf=100.0, snapshot_freq=100)
     end
 end
 
@@ -197,20 +197,20 @@ end =#
 
 # %%
 results = h5open(soln_path, "r") do soln
-    (; t=read(soln["all/t"]), CL=read(soln["all/CL"]), CD=read(soln["all/CD"]))
+    (; t=read(soln["all/t"]), Cl=read(soln["all/Cl"]), Cd=read(soln["all/Cd"]))
 end;
 
 # %%
 i_start = 1 + round(Int, 50 / dt)
 
-peaks = map((; CL=results.CL, CD=results.CD)) do y
+peaks = map((; Cl=results.Cl, Cd=results.Cd)) do y
     z = @view y[Base.IdentityUnitRange(i_start:end)]
     (findminima(z), findmaxima(z))
 end
 
 periods = map(x -> mean(diff(results.t[x[2].indices])), peaks)
 
-Pr = 1 / periods.CL
+Pr = 1 / periods.Cl
 
 oscillations = map(peaks) do p
     (a, b) = map(x -> mean(x.heights), p)
@@ -222,14 +222,14 @@ end
 p = plot(legend = :topright, xlabel = "t", ylabel = "", ylims = (-2, 2),
          framestyle = :box)
 
-for f in (:CL, :CD)
+for f in (:Cl, :Cd)
     t = results.t
     C = results[f]
     pks = peaks[f]              # (minima, maxima)
     μ, A = oscillations[f]      # (mean, amplitude)
 
     # pick a color per signal
-    col = f == :CL ? :blue : :red
+    col = f == :Cl ? :blue : :red
 
     # line
     plot!(p, t, C; color=col, label=String(f))
@@ -242,8 +242,7 @@ for f in (:CL, :CD)
     hline!(p, [μ - A, μ + A]; color=col, linestyle=:dash, label="")
 end
 
-display(p)
-savefig(p, "test.png")
+savefig(p, joinpath(output_path, "Cl_Cd.png"))
 
 # %%    
 # Using Makie to visualize lift and drag coefficients with peaks and oscillation bands
@@ -251,7 +250,7 @@ savefig(p, "test.png")
 #     fig = Figure()
 #     ax = Axis(fig[1, 1]; limits=(nothing, (-2, 2)))
 
-#     for f in (:CL, :CD)
+#     for f in (:Cl, :Cd)
 #         C = results[f]
 #         p = peaks[f]
 #         o = oscillations[f]
