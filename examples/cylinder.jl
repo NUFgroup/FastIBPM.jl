@@ -107,12 +107,12 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=10.0, snapshot_freq=100)
+        solution(file; tf=100.0, snapshot_freq=100)
     end
 end
 
 output_path = joinpath(@__DIR__,  "figures")
-mkdir(output_path; recursive=true)
+mkdir(output_path)
 
 # %%
 # Using Plots to visualize the vorticity field and save as an animation
