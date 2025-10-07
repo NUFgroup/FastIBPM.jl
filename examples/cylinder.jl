@@ -3,15 +3,26 @@
 using FastIBPM
 using StaticArrays
 using ProgressMeter
-using CairoMakie
 using OffsetArrays
 using LinearAlgebra
 using HDF5
 using Peaks
 using Statistics
 using Printf
+using Plots
+#using CairoMakie
 
-CairoMakie.activate!(; type="svg")
+# This example simulates flow around a cylinder at Re=200. It uses a uniform inflow
+# condition and perturbs the initial vorticity field to induce vortex shedding.
+# The simulation data is saved to an HDF5 file, which is then used to create a
+# visualization of the vorticity field and plots of the lift and drag coefficients. 
+# You can use the Makie backend of your choice; here we use the Plots backend for static plots. 
+# To use Makie, simply comment the ''' using Plots ''' and uncomment the ''' using CairoMakie ''' line.
+# You can also change the output format by modifying the argument to
+# '''CairoMakie.activate!''' (e.g., to "png" or "pdf").
+
+
+#CairoMakie.activate!(; type="svg")
 
 # %%
 h = 0.02  # grid cell size
@@ -96,12 +107,51 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=80.0, snapshot_freq=100)
+        solution(file; tf=100.0, snapshot_freq=100)
     end
 end
 
 # %%
-h5open(soln_path, "r") do file
+# Using Plots to visualize the vorticity field and save as an animation
+h5open(soln_file, "r") do file
+    t = read(file["snapshots/t"])
+    ω = file["snapshots/omega"]
+    ω_start = read_attribute(ω, "firstindex")
+    nx, ny, nlev, nt = size(ω)
+    xidx = ω_start[1]:(w_start[1] + nx - 1)
+    yidx = ω_start[2]:(w_start[2] + ny - 1)
+
+    ωlim = 7.5
+    r = 0.485; θ = range(0, 2π; length=400)
+    cx, cy = r .* cos.(θ), r .* sin.(θ)
+    
+    anim = Animation()
+    @showprogress for i in eachindex(t)
+        # start a fresh frame
+        p = plot(legend=false, aspect_ratio=:equal,
+             xlim=(-2,8), ylim=(-2,2), framestyle=:box)
+
+        # draw coarse→fine so the finest sits on top
+        for lev in nlev:-1:1
+            X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
+            xvec, yvec = X[:,1], Y[:,1]
+            z = ω[:, :, lev, i]
+            # # xvec, yvec from coord; z is Nx×Ny
+            heatmap!(xvec, yvec, z'; aspect_ratio=:equal, colormap=:bwr,
+             xlim=(-2,15), ylim=(-3,3), legend=false, clim = (-ωlim,ωlim))
+        end
+
+        plot!(Shape(cx, cy), color=:gray, lw=0)
+        title!(@sprintf("t = %.2f", t[i]))
+        frame(anim, p)
+    end
+
+    gif(anim, "vorticity_multilevel.gif", fps=30)
+end
+
+# %%
+# Using Makie to visualize the vorticity field and save as an animation
+#= h5open(soln_path, "r") do file
     fig = Figure(; size=(800, 300))
     ax = Axis(fig[1, 1]; limits=((-2, 8), (-2, 2)), aspect=DataAspect())
 
@@ -140,7 +190,7 @@ h5open(soln_path, "r") do file
         ti[] = t[i]
         ωi[] = ω[:, :, :, i]
     end
-end
+end =#
 
 # %%
 results = h5open(soln_path, "r") do soln
@@ -165,6 +215,34 @@ oscillations = map(peaks) do p
 end
 
 # %%
+# Using Plots to visualize lift and drag coefficients with peaks and oscillation bands
+p = plot(legend = :topright, xlabel = "t", ylabel = "", ylims = (-2, 2),
+         framestyle = :box)
+
+for f in (:CL, :CD)
+    t = results.t
+    C = results[f]
+    pks = peaks[f]              # (minima, maxima)
+    μ, A = oscillations[f]      # (mean, amplitude)
+
+    # pick a color per signal
+    col = f == :CL ? :blue : :red
+
+    # line
+    plot!(p, t, C; color=col, label=String(f))
+
+    # peak markers (both minima and maxima)
+    idx = vcat(pks[1].indices, pks[2].indices)
+    scatter!(p, t[idx], C[idx]; color=col, ms=2.5, label="")
+
+    # horizontal bands at mean ± amplitude
+    hline!(p, [μ - A, μ + A]; color=col, linestyle=:dash, label="")
+end
+
+display(p)
+
+# %%    
+# Using Makie to visualize lift and drag coefficients with peaks and oscillation bands
 let
     fig = Figure()
     ax = Axis(fig[1, 1]; limits=(nothing, (-2, 2)))
