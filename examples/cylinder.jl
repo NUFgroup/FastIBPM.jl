@@ -107,19 +107,22 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=100.0, snapshot_freq=100)
+        solution(file; tf=20.0, snapshot_freq=100)
     end
 end
 
+output_path = joinpath(@__DIR__,  "figures")
+
+
 # %%
 # Using Plots to visualize the vorticity field and save as an animation
-h5open(soln_file, "r") do file
+h5open(soln_path, "r") do file
     t = read(file["snapshots/t"])
     ω = file["snapshots/omega"]
     ω_start = read_attribute(ω, "firstindex")
     nx, ny, nlev, nt = size(ω)
-    xidx = ω_start[1]:(w_start[1] + nx - 1)
-    yidx = ω_start[2]:(w_start[2] + ny - 1)
+    xidx = ω_start[1]:(ω_start[1] + nx - 1)
+    yidx = ω_start[2]:(ω_start[2] + ny - 1)
 
     ωlim = 7.5
     r = 0.485; θ = range(0, 2π; length=400)
@@ -146,7 +149,7 @@ h5open(soln_file, "r") do file
         frame(anim, p)
     end
 
-    gif(anim, "vorticity_multilevel.gif", fps=30)
+    gif(anim, joinpath(output_path, "vorticity.gif"), fps=30)
 end
 
 # %%
@@ -240,25 +243,26 @@ for f in (:CL, :CD)
 end
 
 display(p)
+savefig(p, "test.png")
 
 # %%    
 # Using Makie to visualize lift and drag coefficients with peaks and oscillation bands
-let
-    fig = Figure()
-    ax = Axis(fig[1, 1]; limits=(nothing, (-2, 2)))
+# let
+#     fig = Figure()
+#     ax = Axis(fig[1, 1]; limits=(nothing, (-2, 2)))
 
-    for f in (:CL, :CD)
-        C = results[f]
-        p = peaks[f]
-        o = oscillations[f]
+#     for f in (:CL, :CD)
+#         C = results[f]
+#         p = peaks[f]
+#         o = oscillations[f]
 
-        lines!(ax, results.t, C)
+#         lines!(ax, results.t, C)
 
-        i = [(x.indices for x in p)...;]
-        scatter!(ax, results.t[i], C[i])
+#         i = [(x.indices for x in p)...;]
+#         scatter!(ax, results.t[i], C[i])
 
-        hlines!(ax, @.(o[1] + [-1, 1] * o[2]); linestyle=:dash)
-    end
+#         hlines!(ax, @.(o[1] + [-1, 1] * o[2]); linestyle=:dash)
+#     end
 
-    fig
-end
+#     fig
+# end
