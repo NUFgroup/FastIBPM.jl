@@ -25,6 +25,14 @@ using Plots
 #CairoMakie.activate!(; type="svg")
 
 # %%
+# Set up output directory
+const _FILEPATH = let f = @__FILE__; isempty(f) ? PROGRAM_FILE : f end
+const CASE     = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
+const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
+const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
+mkpath(OUTDIR)
+
+# %%
 h = 0.02  # grid cell size
 gridlims = SA[-1.0 3.0; -2.0 2.0]
 grid = Grid(;
@@ -101,18 +109,15 @@ function solution(file; tf, snapshot_freq)
 end
 
 # %%
-soln_path = "cylinder.h5"
+soln_path = joinpath(SRCDIR, "$(CASE).h5")
 
 if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=100.0, snapshot_freq=100)
+        solution(file; tf=40.0, snapshot_freq=100)
     end
 end
-
-output_path = joinpath(@__DIR__,  "figures")
-mkdir(output_path)
 
 # %%
 # Using Plots to visualize the vorticity field and save as an animation
@@ -149,7 +154,7 @@ h5open(soln_path, "r") do file
         frame(anim, p)
     end
 
-    gif(anim, joinpath(output_path, "cylinder_vorticity.gif"), fps=30)
+    gif(anim, joinpath(OUTDIR, "$(CASE)_vorticity.gif"), fps=30)
 end
 
 # %%
@@ -242,7 +247,7 @@ for f in (:Cl, :Cd)
     hline!(p, [μ - A, μ + A]; color=col, linestyle=:dash, label="")
 end
 
-savefig(p, joinpath(output_path, "cylinder_Cl_Cd.png"))
+savefig(p, joinpath(OUTDIR, "$(CASE)_Cl_Cd.png"))
 
 # %%    
 # Using Makie to visualize lift and drag coefficients with peaks and oscillation bands
