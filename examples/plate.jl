@@ -119,7 +119,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=40.0, snapshot_freq=100)
+        solution(file; tf=4.0, snapshot_freq=100)
     end
 end
 
