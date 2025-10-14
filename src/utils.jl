@@ -1,3 +1,9 @@
+using Printf
+
+# Simple timestep logger for examples
+function log_timestep(i, t, wall_time)
+    @printf(stderr, "iter %6d | wall_time %9.2f | sim_time %6.3f\n", i, wall_time, t)
+end
 axisunit(::Val{N}, i) where {N} = CartesianIndex(ntuple(==(i), N))
 axisunit(::Val{N}) where {N} = Base.Fix1(axisunit, Val(N))
 axisunit(::CartesianIndex{N}) where {N} = Base.Fix1(axisunit, Val(N))
