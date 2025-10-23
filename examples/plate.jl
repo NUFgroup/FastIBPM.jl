@@ -12,7 +12,7 @@ using Printf
 using Plots
 #using CairoMakie
 
-# This example simulates flow around a cylinder at Re=200. It uses a uniform inflow
+# This example simulates flow around a plate at Re=400 at θ = 12 deg. It uses a uniform inflow
 # condition and perturbs the initial vorticity field to induce vortex shedding.
 # The simulation data is saved to an HDF5 file, which is then used to create a
 # visualization of the vorticity field and plots of the lift and drag coefficients. 
@@ -32,31 +32,35 @@ const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
 const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
+
 # %%
-h = 0.02  # grid cell size
-gridlims = SA[-1.0 3.0; -2.0 2.0]
+h = 0.005  # grid cell size
+gridlims = SA[-1.0 2.0; -1.0 1.0]
 grid = Grid(;
     h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=5
 )
 
 # %%
-r = 0.5  # cylinder radius
-S = 2π * r  # cylinder circumference
-n_ib = round(Int, S / (2 * h))  # number of immersed boundary points
-ds = S / n_ib  # arclength delta at each point
+L = 1.0  # plate length
+x0 = SA[-0.25, 0.0] # plate starting position
+theta = 12 # plate angle of attack
+n_ib = round(Int, L / (2 * h))  # number of immersed boundary points
+ds = L / n_ib  # arclength delta at each point
 
 body = let
-    x = map(range(0, 2π, n_ib + 1)[1:end-1]) do θ
-        r * SA[cos(θ), sin(θ)]
+    θ = deg2rad(-theta)
+    s = range(0, L, n_ib)
+    x = map(s) do si 
+        SA[x0[1] + si * cos(θ), x0[2] + si * sin(θ)]
     end
     StaticBody(x, fill(ds, n_ib))
 end;
 
 # %%
-dt = 0.002
-Re = 200.0
+dt = 0.001
+Re = 400.0
 u0 = UniformFlow(t -> SA[1.0, 0.0])
-prob = IBProblem(grid, body, Re, u0);
+prob = IBProblem(grid, body, Re, u0)
 
 # %%
 function solution(file; tf, snapshot_freq)
@@ -130,8 +134,9 @@ h5open(soln_path, "r") do file
     yidx = ω_start[2]:(ω_start[2] + ny - 1)
 
     ωlim = 7.5
-    r = 0.485; θ = range(0, 2π; length=400)
-    cx, cy = r .* cos.(θ), r .* sin.(θ)
+    # plate polyline (precompute once)
+    plate_x = getindex.(body.x, 1)
+    plate_y = getindex.(body.x, 2)
     
     anim = Animation()
     @showprogress for i in eachindex(t)
@@ -149,7 +154,7 @@ h5open(soln_path, "r") do file
              xlim=(-2,15), ylim=(-3,3), legend=false, clim = (-ωlim,ωlim))
         end
 
-        plot!(Shape(cx, cy), color=:gray, lw=0)
+        plot!(plate_x, plate_y, color=:gray, lw=3)
         title!(@sprintf("t = %.2f", t[i]))
         frame(anim, p)
     end

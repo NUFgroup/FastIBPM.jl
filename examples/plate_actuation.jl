@@ -12,7 +12,7 @@ using Printf
 using Plots
 #using CairoMakie
 
-# This example simulates flow around a cylinder at Re=200. It uses a uniform inflow
+# This example simulates flow around a plate at Re=400 at θ = 12 deg. It uses a uniform inflow
 # condition and perturbs the initial vorticity field to induce vortex shedding.
 # The simulation data is saved to an HDF5 file, which is then used to create a
 # visualization of the vorticity field and plots of the lift and drag coefficients. 
@@ -32,31 +32,65 @@ const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
 const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
+
 # %%
-h = 0.02  # grid cell size
+h = 0.005  # grid cell size
 gridlims = SA[-1.0 3.0; -2.0 2.0]
 grid = Grid(;
     h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=5
 )
 
 # %%
-r = 0.5  # cylinder radius
-S = 2π * r  # cylinder circumference
-n_ib = round(Int, S / (2 * h))  # number of immersed boundary points
-ds = S / n_ib  # arclength delta at each point
+L = 1.0  # plate length
+x0 = SA[-0.5, 0.0] # plate starting position
+theta = 12 # plate angle of attack
+θ = deg2rad(-theta)
+n_ib = round(Int, L / (2 * h))  # number of immersed boundary points
+ds = L / n_ib  # arclength delta at each point
+x     = [ SA[x0[1] + s*cos(θ), x0[2] + s*sin(θ)] for s in range(0, L, n_ib) ]
+# Tangent & chordwise coordinate per IB point
+t̂     = fill(SA[cos(θ), sin(θ)], n_ib)                # unit tangent at every point
+ŝ      = collect(range(0.0, 1.0; length=n_ib))         # normalized arclength
 
-body = let
-    x = map(range(0, 2π, n_ib + 1)[1:end-1]) do θ
-        r * SA[cos(θ), sin(θ)]
+
+top_hat(ŝ; s0=0.10, s1=0.30) = (s0 <= ŝ <= s1) ? 1.0 : 0.0
+gauss(ŝ; sc=0.20, sigma_s=0.05)   = exp(-0.5*((ŝ - sc)/sigma_s)^2)
+w(ŝ) = top_hat(ŝ; s0=0.10, s1=0.30)
+
+
+# Actuation parameters
+U∞   = 1.0                # your inflow speed in UniformFlow
+sigma    = 2               # amplitude ratio
+U_a  = sigma * U∞
+f_sl = 0.60               # Hz in your nondim time units
+ϕ    = 0.0
+
+
+# Build the body with an in-place velocity callback
+body = StaticBody(
+    x, fill(ds, n_ib),
+    (u, i_step, tnow) -> begin
+        A = U_a * sin(2π * f_sl * tnow + ϕ)
+        @inbounds @simd for j in eachindex(u)
+            u[j] = A * w(ŝ[j]) * t̂[j]   # purely tangential; normal is identically 0
+        end
     end
-    StaticBody(x, fill(ds, n_ib))
-end;
+)
+
+# body = let
+#     θ = deg2rad(-theta)
+#     s = range(0, L, n_ib)
+#     x = map(s) do si 
+#         SA[x0[1] + si * cos(θ), x0[2] + si * sin(θ)]
+#     end
+#     StaticBody(x, fill(ds, n_ib))
+# end;
 
 # %%
-dt = 0.002
-Re = 200.0
+dt = 0.001
+Re = 400.0
 u0 = UniformFlow(t -> SA[1.0, 0.0])
-prob = IBProblem(grid, body, Re, u0);
+prob = IBProblem(grid, body, Re, u0)
 
 # %%
 function solution(file; tf, snapshot_freq)
@@ -115,7 +149,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=40.0, snapshot_freq=100)
+        solution(file; tf=10.0, snapshot_freq=100)
     end
 end
 
@@ -130,8 +164,9 @@ h5open(soln_path, "r") do file
     yidx = ω_start[2]:(ω_start[2] + ny - 1)
 
     ωlim = 7.5
-    r = 0.485; θ = range(0, 2π; length=400)
-    cx, cy = r .* cos.(θ), r .* sin.(θ)
+    # plate polyline (precompute once)
+    plate_x = getindex.(body.x, 1)
+    plate_y = getindex.(body.x, 2)
     
     anim = Animation()
     @showprogress for i in eachindex(t)
@@ -146,10 +181,10 @@ h5open(soln_path, "r") do file
             z = ω[:, :, lev, i]
             # # xvec, yvec from coord; z is Nx×Ny
             heatmap!(xvec, yvec, z'; aspect_ratio=:equal, colormap=:bwr,
-             xlim=(-2,15), ylim=(-3,3), legend=false, clim = (-ωlim,ωlim))
+             xlim=(-1,2), ylim=(-0.5,0.5), legend=false, clim = (-ωlim,ωlim))
         end
 
-        plot!(Shape(cx, cy), color=:gray, lw=0)
+        plot!(plate_x, plate_y, color=:gray, lw=3)
         title!(@sprintf("t = %.2f", t[i]))
         frame(anim, p)
     end

@@ -24,6 +24,7 @@ export IBProblem
 export set_time!,
     step!, zero_vorticity!, apply_vorticity!, surface_force!, surface_force_sum
 export CNAB
+export log_timestep
 
 include("FFT_R2R.jl")
 include("utils.jl")
