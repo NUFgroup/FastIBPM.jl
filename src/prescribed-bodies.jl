@@ -42,3 +42,19 @@ end
 #         end
 #     end
 # )
+
+update_body_points!(::BodyPoints, ::StaticBody, i, t) = nothing
+
+struct GroupedPrescribedBody{T<:Tuple{Vararg{AbstractPrescribedBody}}} <: AbstractPrescribedBody
+    bodies::T
+end
+
+point_count(body::GroupedPrescribedBody) = sum(point_count, body.bodies)
+
+function init_body_points!(points::BodyPoints, body::GroupedPrescribedBody)
+    foreach(b -> init_body_points!(points, b), body.bodies)
+end
+
+function update_body_points!(points::BodyPoints, body::GroupedPrescribedBody, i, t)
+    foreach(b -> update_body_points!(points, b, i, t), body.bodies)
+end
