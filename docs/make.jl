@@ -3,9 +3,14 @@ using FastIBPM
 
 makedocs(
     sitename = "FastIBPM",
-    format = Documenter.HTML(),
+    format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
     modules = [FastIBPM],
-    checkdocs = :none
+    checkdocs = :none,
+    pages = [
+        "Home"          => "index.md",
+        "Examples"      => "examples.md",
+        "API Reference" => "api.md",     # <- add this
+    ],
 )
 
 # Documenter can also automatically deploy documentation to gh-pages.
