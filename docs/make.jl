@@ -22,7 +22,7 @@ makedocs(
 )
 
 deploydocs(
-    repo      = "github.com/arturofburgos/FastIBPM.jl",
+    repo      = "github.com/NUFgroup/FastIBPM.jl",
     devbranch = "main",
 )
 
