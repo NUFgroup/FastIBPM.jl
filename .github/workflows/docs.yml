@@ -1,0 +1,37 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+
+      - name: Install docs dependencies
+        run: |
+          julia --project=docs -e '
+            using Pkg
+            # Use the local package in docs environment
+            Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.instantiate()
+          '
+
+      - name: Build and deploy docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          julia --project=docs docs/make.jl
