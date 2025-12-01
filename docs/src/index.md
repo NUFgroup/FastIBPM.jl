@@ -1,6 +1,6 @@
 # FastIBPM.jl
 
-Julia CFD package based on the Immersed Boundary Projection Method (IBPM) from [Taira & Colonius (2007)](https://doi.org/10.1016/j.jcp.2007.03.005), [Colonius & Taira (2008)](https://doi.org/10.1016/j.cma.2007.08.014) and [Goza & Colonius (2008)](https://doi.org/10.1016/j.jcp.2017.02.027)
+Julia CFD package based on the Immersed Boundary Projection Method (IBPM) from [Taira & Colonius (2007)](https://doi.org/10.1016/j.jcp.2007.03.005), [Colonius & Taira (2008)](https://doi.org/10.1016/j.cma.2007.08.014) and [Goza & Colonius (2017)](https://doi.org/10.1016/j.jcp.2017.02.027)
 
 ---
 ## Overview
