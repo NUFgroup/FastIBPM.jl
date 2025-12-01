@@ -9,7 +9,15 @@ makedocs(
     pages = [
         "Home"          => "index.md",
         "Examples"      => "examples.md",
-        "API Reference" => "api.md",     # <- add this
+        "API Reference" => [
+            "Problem Definition" => "problem_definition.md",
+            "CNAB"    => "cnab.md",
+            "Prescribed Bodies"  => "prescribed_bodies.md",
+            "Operators"          => "operators.md",
+            "FFT Transforms"     => "fft_r2r.md",
+            "Utilities"          => "utils.md",
+            
+        ],
     ],
 )
 
