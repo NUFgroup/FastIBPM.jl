@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · FastIBPM</title><meta name="title" content="Examples · FastIBPM"/><meta property="og:title" content="Examples · FastIBPM"/><meta property="twitter:title" content="Examples · FastIBPM"/><meta name="description" content="Documentation for FastIBPM."/><meta property="og:description" content="Documentation for FastIBPM."/><meta property="twitter:description" content="Documentation for FastIBPM."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FastIBPM</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li class="toplevel"><a class="tocitem" href="#Flow-Past-a-Cylinder-(Re-200)-—-FastIBPM-Example"><span>Flow Past a Cylinder (Re = 200) — FastIBPM Example</span></a></li><li><a class="tocitem" href="#1.-Setup"><span>1. Setup</span></a></li><li><a class="tocitem" href="#2.-Grid-and-Body-Definition"><span>2. Grid and Body Definition</span></a></li><li><a class="tocitem" href="#3.-Problem-Definition"><span>3. Problem Definition</span></a></li><li><a class="tocitem" href="#4.-Simulation-Loop"><span>4. Simulation Loop</span></a></li><li><a class="tocitem" href="#5.-Visualization"><span>5. Visualization</span></a></li><li><a class="tocitem" href="#6.-Lift-and-Drag-Coefficients"><span>6. Lift and Drag Coefficients</span></a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../problem_definition/">Problem Definition</a></li><li><a class="tocitem" href="../cnab/">CNAB</a></li><li><a class="tocitem" href="../prescribed_bodies/">Prescribed Bodies</a></li><li><a class="tocitem" href="../operators/">Operators</a></li><li><a class="tocitem" href="../fft_r2r/">FFT Transforms</a></li><li><a class="tocitem" href="../utils/">Utilities</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/NUFgroup/FastIBPM.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/NUFgroup/FastIBPM.jl/blob/main/docs/src/examples.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="FastIBPM.jl-Example"><a class="docs-heading-anchor" href="#FastIBPM.jl-Example">FastIBPM.jl Example</a><a id="FastIBPM.jl-Example-1"></a><a class="docs-heading-anchor-permalink" href="#FastIBPM.jl-Example" title="Permalink"></a></h1><p>One example on how to run the code. The <code>src</code> folder contains all the necessary files to run it. More examples are provided in the examples folder.</p><h1 id="Flow-Past-a-Cylinder-(Re-200)-—-FastIBPM-Example"><a class="docs-heading-anchor" href="#Flow-Past-a-Cylinder-(Re-200)-—-FastIBPM-Example">Flow Past a Cylinder (Re = 200) — FastIBPM Example</a><a id="Flow-Past-a-Cylinder-(Re-200)-—-FastIBPM-Example-1"></a><a class="docs-heading-anchor-permalink" href="#Flow-Past-a-Cylinder-(Re-200)-—-FastIBPM-Example" title="Permalink"></a></h1><p>This example simulates flow around a circular cylinder at Reynolds number Re = 200. </p><p>A small perturbation is added to the initial vorticity field to trigger natural vortex shedding. The simulation is performed using <strong>FastIBPM.jl</strong>, and results are saved to an <strong>HDF5 file</strong>. We then visualize vorticity fields and compute lift and drag coefficients.</p><hr/><h2 id="1.-Setup"><a class="docs-heading-anchor" href="#1.-Setup">1. Setup</a><a id="1.-Setup-1"></a><a class="docs-heading-anchor-permalink" href="#1.-Setup" title="Permalink"></a></h2><p>Load the required packages and set up the output directory:</p><pre><code class="language-julia hljs">using FastIBPM
+using StaticArrays
+using ProgressMeter
+using OffsetArrays
+using LinearAlgebra
+using HDF5
+using Peaks
+using Statistics
+using Printf
+using Plots
+
+# Set up output directory
+const CASE = &quot;cylinder_Re200&quot;
+const OUTDIR = joinpath(pwd(), &quot;figures&quot;, CASE)
+mkpath(OUTDIR)</code></pre><hr/><h2 id="2.-Grid-and-Body-Definition"><a class="docs-heading-anchor" href="#2.-Grid-and-Body-Definition">2. Grid and Body Definition</a><a id="2.-Grid-and-Body-Definition-1"></a><a class="docs-heading-anchor-permalink" href="#2.-Grid-and-Body-Definition" title="Permalink"></a></h2><p>We define a multilevel grid with resolution <code>h = 0.02</code> and a circular cylinder body.</p><pre><code class="language-julia hljs">h = 0.02  # grid cell size
+gridlims = SA[-1.0 3.0; -2.0 2.0]
+
+grid = Grid(;
+    h,
+    n = @.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)),
+    x0 = gridlims[:, 1],
+    levels = 5
+)
+
+# Cylinder definition
+r = 0.5                   # cylinder radius
+S = 2π * r                # cylinder circumference
+n_ib = round(Int, S / (2 * h))  # number of IB points
+ds = S / n_ib
+
+body = let
+    x = map(range(0, 2π, n_ib + 1)[1:end-1]) do θ
+        r * SA[cos(θ), sin(θ)]
+    end
+    StaticBody(x, fill(ds, n_ib))
+end</code></pre><hr/><h2 id="3.-Problem-Definition"><a class="docs-heading-anchor" href="#3.-Problem-Definition">3. Problem Definition</a><a id="3.-Problem-Definition-1"></a><a class="docs-heading-anchor-permalink" href="#3.-Problem-Definition" title="Permalink"></a></h2><p>Define time step, Reynolds number, and freestream inflow:</p><pre><code class="language-julia hljs">dt = 0.002
+Re = 200.0
+
+u0 = UniformFlow(t -&gt; SA[1.0, 0.0])
+prob = IBProblem(grid, body, Re, u0)</code></pre><hr/><h2 id="4.-Simulation-Loop"><a class="docs-heading-anchor" href="#4.-Simulation-Loop">4. Simulation Loop</a><a id="4.-Simulation-Loop-1"></a><a class="docs-heading-anchor-permalink" href="#4.-Simulation-Loop" title="Permalink"></a></h2><p>We define the solver loop that:</p><ul><li>Initializes a CNAB solver  </li><li>Adds a perturbation to trigger shedding  </li><li>Steps through time  </li><li>Saves vorticity snapshots and force data  </li></ul><pre><code class="language-julia hljs">function solution(file; tf, snapshot_freq)
+    T = Float64
+    sol = CNAB(prob; dt, delta=FastIBPM.DeltaYang3S2())
+
+    # Perturbation to induce vortex shedding
+    map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
+        x = coord(grid, Loc_ω(3), I)
+        p = x - SA[-0.75, 0]
+        r = 0.25
+        0.5 * (1 - clamp(norm(p) / r, 0, 1))
+    end
+    apply_vorticity!(sol)
+
+    # Setup HDF5 datasets
+    i_all = 1:1+round(Int, tf / dt)
+    n_all = length(i_all)
+    i_snapshot = i_all[1:snapshot_freq:end]
+    n_snapshot = length(i_snapshot)
+
+    all_group = create_group(file, &quot;all&quot;)
+    t_all = create_dataset(all_group, &quot;t&quot;, T, (n_all,))
+    Cl = create_dataset(all_group, &quot;Cl&quot;, T, (n_all,))
+    Cd = create_dataset(all_group, &quot;Cd&quot;, T, (n_all,))
+
+    snapshot_group = create_group(file, &quot;snapshots&quot;)
+    t_snapshot = create_dataset(snapshot_group, &quot;t&quot;, T, (n_snapshot,))
+    ω = create_dataset(
+        snapshot_group, &quot;omega&quot;, T, (size(sol.ω[1][3])..., grid.levels, n_snapshot)
+    )
+    write_attribute(ω, &quot;firstindex&quot;, collect(first.(axes(sol.ω[1][3]))))
+
+    # Time integration loop
+    @showprogress desc = &quot;solving&quot; for _ in 0:round(Int, tf / dt)
+        step!(sol)
+
+        # Compute forces (Drag = x-force, Lift = y-force)
+        f = surface_force_sum(sol)
+        t_all[sol.i] = sol.t
+        Cd[sol.i] = 2 * f[1]
+        Cl[sol.i] = 2 * f[2]
+
+        # Save snapshots
+        if sol.i in i_snapshot
+            i = 1 + (sol.i - first(i_snapshot)) ÷ step(i_snapshot)
+            t_snapshot[i] = sol.t
+            for level in eachindex(sol.ω)
+                ω[:, :, level, i] = OffsetArrays.no_offset_view(sol.ω[level][3])
+            end
+        end
+    end
+end</code></pre><h3 id="Run-the-simulation"><a class="docs-heading-anchor" href="#Run-the-simulation">Run the simulation</a><a id="Run-the-simulation-1"></a><a class="docs-heading-anchor-permalink" href="#Run-the-simulation" title="Permalink"></a></h3><pre><code class="language-julia hljs">soln_path = joinpath(OUTDIR, &quot;$(CASE).h5&quot;)
+
+if isfile(soln_path)
+    @info &quot;File already exists&quot; soln_path
+else
+    h5open(soln_path, &quot;cw&quot;) do file
+        solution(file; tf=40.0, snapshot_freq=100)
+    end
+end</code></pre><hr/><h2 id="5.-Visualization"><a class="docs-heading-anchor" href="#5.-Visualization">5. Visualization</a><a id="5.-Visualization-1"></a><a class="docs-heading-anchor-permalink" href="#5.-Visualization" title="Permalink"></a></h2><h3 id="Vorticity-Animation"><a class="docs-heading-anchor" href="#Vorticity-Animation">Vorticity Animation</a><a id="Vorticity-Animation-1"></a><a class="docs-heading-anchor-permalink" href="#Vorticity-Animation" title="Permalink"></a></h3><pre><code class="language-julia hljs">h5open(soln_path, &quot;r&quot;) do file
+    t = read(file[&quot;snapshots/t&quot;])
+    ω = file[&quot;snapshots/omega&quot;]
+    ω_start = read_attribute(ω, &quot;firstindex&quot;)
+    nx, ny, nlev, nt = size(ω)
+
+    xidx = ω_start[1]:(ω_start[1] + nx - 1)
+    yidx = ω_start[2]:(ω_start[2] + ny - 1)
+
+    ωlim = 7.5
+
+    r = 0.485
+    θ = range(0, 2π; length=400)
+    cx, cy = r .* cos.(θ), r .* sin.(θ)
+
+    anim = Animation()
+    @showprogress for i in eachindex(t)
+        p = plot(legend=false, aspect_ratio=:equal,
+             xlim=(-2,8), ylim=(-2,2), framestyle=:box)
+
+        # Draw from coarse → fine
+        for lev in nlev:-1:1
+            X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
+            xvec, yvec = X[:,1], Y[:,1]
+            z = ω[:, :, lev, i]
+            heatmap!(
+                xvec, yvec, z&#39;;
+                aspect_ratio=:equal, colormap=:bwr,
+                xlim=(-2,15), ylim=(-3,3),
+                clim = (-ωlim, ωlim), legend=false
+            )
+        end
+
+        plot!(Shape(cx, cy), color=:gray, lw=0)
+        title!(@sprintf(&quot;t = %.2f&quot;, t[i]))
+        frame(anim, p)
+    end
+
+    gif(anim, joinpath(OUTDIR, &quot;$(CASE)_vorticity.gif&quot;), fps=30)
+end</code></pre><hr/><h2 id="6.-Lift-and-Drag-Coefficients"><a class="docs-heading-anchor" href="#6.-Lift-and-Drag-Coefficients">6. Lift and Drag Coefficients</a><a id="6.-Lift-and-Drag-Coefficients-1"></a><a class="docs-heading-anchor-permalink" href="#6.-Lift-and-Drag-Coefficients" title="Permalink"></a></h2><pre><code class="language-julia hljs">results = h5open(soln_path, &quot;r&quot;) do soln
+    (; t=read(soln[&quot;all/t&quot;]), Cl=read(soln[&quot;all/Cl&quot;]), Cd=read(soln[&quot;all/Cd&quot;]))
+end
+
+# Analyze steady state (skip initial transient)
+i_start = 1 + round(Int, 50 / dt)
+
+peaks = map((; Cl=results.Cl, Cd=results.Cd)) do y
+    z = @view y[Base.IdentityUnitRange(i_start:end)]
+    (findminima(z), findmaxima(z))
+end
+
+oscillations = map(peaks) do p
+    (a, b) = map(x -&gt; mean(x.heights), p)
+    ((a + b) / 2, (b - a) / 2)
+end
+
+# Plot
+p = plot(legend = :topright, xlabel = &quot;t&quot;, ylabel = &quot;&quot;, ylims = (-2, 2),
+         framestyle = :box)
+
+for f in (:Cl, :Cd)
+    t = results.t
+    C = results[f]
+    pks = peaks[f]              # (minima, maxima)
+    μ, A = oscillations[f]      # (mean, amplitude)
+
+    col = f == :Cl ? :blue : :red
+
+    # Trace
+    plot!(p, t, C; color=col, label=String(f))
+
+    # Peak markers
+    idx = vcat(pks[1].indices, pks[2].indices)
+    scatter!(p, t[idx], C[idx]; color=col, ms=2.5, label=&quot;&quot;)
+
+    # Mean ± amplitude
+    hline!(p, [μ - A, μ + A]; color=col, linestyle=:dash, label=&quot;&quot;)
+end
+
+savefig(p, joinpath(OUTDIR, &quot;$(CASE)_Cl_Cd.png&quot;))</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../problem_definition/">Problem Definition »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Monday 1 December 2025 22:51">Monday 1 December 2025</span>. Using Julia version 1.11.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
