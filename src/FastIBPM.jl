@@ -51,7 +51,7 @@ export IncludeBoundary, ExcludeBoundary
 export IrrotationalFlow, UniformFlow
 
 # Body dynamics and structure types
-export AbstractBody, AbstractPrescribedBody, StaticBody, GeometricNonlinearBody
+export AbstractBody, AbstractPrescribedBody, StaticBody, MovingBody, GeometricNonlinearBody
 export StructureBC
 
 # Immersed boundary problem setup and solvers

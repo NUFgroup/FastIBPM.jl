@@ -21,6 +21,9 @@ abstract type AbstractPrescribedBody <: AbstractBody end
 
 abstract type AbstractStaticBody <: AbstractPrescribedBody end
 
+# Arturo: add abstract type for moving prescribed bodies
+
+abstract type AbstractMovingBody <: AbstractPrescribedBody end
 
 """
     NothingBody{}
@@ -78,9 +81,49 @@ function init_body_points!(points::BodyPoints, body::StaticBody{N,T}) where {N,T
     points.ds[:] = body.ds
 end
 
-function update_body_points!(points::BodyPoints, body::StaticBody, i, t)
-    body.u(points.u, i, t)
+# Arturo: add abstract type for moving prescribed bodies
+
+@kwdef struct PoseTwist2D{T}
+    c::SVector{2,T} # translation
+    θ::T            # rotation angle
+    ċ::SVector{2,T} # translation velocity
+    θ̇::T           # angular velocity
 end
+
+struct MovingBody{N, T,
+                  S<: AbstractVector{T},
+                  A<: AbstractVector{SVector{N,T}},
+                  F} <: AbstractMovingBody
+    x_ref::A          # reference positions
+    ds::S             # weights or spacings
+    motion!::F        # function defining
+end
+
+
+point_count(b::MovingBody) = length(b.x_ref)
+
+MovingBody(x_ref::AbstractVector{SVector{N,T}},
+           ds::AbstractVector{T},
+           motion!::F) where {N,T,F} =
+    MovingBody{N,T,typeof(ds),typeof(x_ref),F}(x_ref, ds, motion!)
+
+# initialize body points at t=0 using the reference shape
+function init_body_points!(points::BodyPoints, body::MovingBody{N,T}) where {N,T}
+    points.x  .= body.x_ref
+    points.u  .= (zero(SVector{N,T}),)
+    points.ds[:] = body.ds
+    return nothing
+end
+
+function update_body_points!(pts::BodyPoints{N,T}, b::MovingBody{N,T}, i, t) where {N,T}
+    # let the user callback *overwrite* current x,u for the time (i,t)
+    b.motion!(pts.x, pts.u, i, t)
+    nothing
+end
+
+# function update_body_points!(points::BodyPoints, body::StaticBody, i, t) #commented out since Nick added the below version
+#     body.u(points.u, i, t)
+# end
 
 # plate.jl
 # tangent = SA[tx, ty]

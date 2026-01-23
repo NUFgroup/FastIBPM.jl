@@ -305,6 +305,32 @@ function initial_sol(backend, body::AbstractStaticBody, sol_args, coupler_args)
     sol
 end
 
+# Arturo: Add initial sol for moving bodies
+
+function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_args)
+    # Build a temporary CNAB to get geometry-dependent weights
+    sol0 = CNAB(; sol_args..., coupler=NothingCoupler())
+
+    # Initialize body points/velocities at t=0
+    init_body_points!(sol0.points, body)
+
+    # Build regularization/redistribution for current geometry
+    update_weights!(sol0.reg, sol0.prob.grid, sol0.points.x, eachindex(sol0.points.x))
+    update_redist_weights!(sol0)
+
+    # Install iterative inverse (no precompute)
+    T = typeof(sol_args.dt)
+    Binv = CNAB_Binv_Iterative{T}()
+
+    coupler = PrescribedBodyCoupler(Binv; coupler_args...)
+    sol = CNAB(; sol_args..., coupler)
+    set_time!(sol, 0)
+    zero_vorticity!(sol)
+    update_redist_weights!(sol)
+
+    return sol
+end
+
 function initial_sol(
     backend, body::GeometricNonlinearBody{N,T}, sol_args, coupler_args
 ) where {N,T}
@@ -633,6 +659,8 @@ function _coupling_step!(sol::CNAB, coupler::PrescribedBodyCoupler, rhs, ψ_b_wo
 
     update_body_points!(sol.points, body, sol.i, sol.t)
     update_reg!(sol, body, eachindex(sol.points.x))
+    # Arturo: for moving bodies, we need to update reg here(?)
+    update_redist_weights!(sol)
     interpolate_body!(rhs, sol.reg, u¹)
 
     rhs .-= sol.points.u
@@ -672,6 +700,29 @@ function (x::CNAB_Binv_Precomputed)(f, u_ib, ::CNAB{N,T}) where {N,T}
     end
 end
 
+
+# Arturo: Add struct and function for moving bodies
+
+Base.@kwdef struct CNAB_Binv_Iterative{T}
+    abstol::T = T(1e-5)
+    reltol::T = T(0.0)
+end
+
+function (op::CNAB_Binv_Iterative{T})(f, rhs, sol::CNAB{N,T}) where {N,T}
+    n_ib = point_count(sol.prob.body)
+    n    = N * n_ib
+
+    # y := B*x with current geometry (uses your existing B_rigid_mul!)
+    Bmap = LinearMap(n; ismutating=true) do y, x
+        B_rigid_mul!(reinterpret(SVector{N,T}, y),
+                     reinterpret(SVector{N,T}, x), sol)
+    end
+
+    # Solve B f = rhs, warm-started by current contents of f
+    bicgstabl!(reinterpret(T, f), Bmap, reinterpret(T, rhs);
+               abstol=op.abstol, reltol=op.reltol)
+    nothing
+end
 
 
 """
