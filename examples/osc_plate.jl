@@ -32,18 +32,18 @@ const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
 const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
-# --- helper: make a vertical-heave rigid-motion callback ---
-function make_heave_motion(x_ref::Vector{SVector{2,Float64}}; A=1.0, f=0.20, ϕ=0.0)
+# --- helper: make a horizontal-surge rigid-motion callback (consistent with your ibpm xc/uc idea) ---
+function make_surge_motion(x_ref::Vector{SVector{2,Float64}}; A=1.0, f=0.20, ϕ=0.0)
     # returns: (x, u, i, t) -> nothing  that overwrites positions & velocities
     return function (x::AbstractVector{SVector{2,Float64}},
                      u::AbstractVector{SVector{2,Float64}},
                      i::Int, t::Float64)
-        y    = A * sin(2π*f*t + ϕ)
-        ydot = 2π*f*A * cos(2π*f*t + ϕ)
+        xshift = A * sin(2π*f*t + ϕ)
+        xdot   = 2π*f*A * cos(2π*f*t + ϕ)
         @inbounds for j in eachindex(x)
-            # translate every reference point by (0, y); rigid velocity is (0, ydot)
-            x[j] = x_ref[j] + SA[0.0, y]
-            u[j] = SA[0.0, ydot]
+            # translate every reference point by (xshift, 0); rigid velocity is (xdot, 0)
+            x[j] = x_ref[j] + SA[xshift, 0.0]
+            u[j] = SA[xdot,  0.0]
         end
         return nothing
     end
@@ -52,38 +52,43 @@ end
 
 
 
+
 # %%
-h = 0.05  # grid cell size
-gridlims = SA[-1.0 3.0; -2.0 2.0]
+h = 0.01  # grid cell size
+gridlims = SA[-4.0 4.0; -2.0 2.0]
 grid = Grid(;
-    h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=5
+    h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=3
 )
 
 # %%
-# --- moving cylinder body (replaces your StaticBody block) ---
-r   = 0.5
-S   = 2π * r
-n_ib = round(Int, S / (2h))          # IB spacing ≈ 2h
-ds   = S / n_ib
+# --- moving plate body (vertical plate oscillating horizontally) ---
+L_plate = 1.0
+α_plate = π/2              # vertical plate (90 deg)
+x0, y0  = 0.0, 0.5          # same idea as your ibpm example
 
-# reference circle (at rest, centered at origin)
-x_ref = map(range(0, 2π, n_ib + 1)[1:end-1]) do θ
-    r * SA[cos(θ), sin(θ)]
-end
+# choose IB point count so spacing ~ 2h (same spirit as your cylinder block)
+n_ib = max(2, 1 + round(Int, L_plate / (2h)))
+ds   = L_plate / (n_ib - 1)
 
-# build heave motion with amplitude = 1.0 (up/down), frequency f (Hz in your nondim time)
-f_heave = 0.50
-motion! = make_heave_motion(x_ref; A=1.0, f=f_heave)
+dir = SA[cos(α_plate), sin(α_plate)]
+s   = range(-L_plate/2, L_plate/2; length=n_ib)
 
-# MovingBody must be your new type that <: AbstractPrescribedBody
-# and whose update_body_points! calls `body.motion!(pts.x, pts.u, i, t)`
+# reference plate points (at rest)
+x_ref = [SA[x0, y0] + si*dir for si in s]
+
+# motion parameters (match your ibpm style: x = A*sin(...), xdot = A*2πf*cos(...))
+A_surge = 1.0
+f_surge = 1/(2π)
+ϕ_surge = -π/2
+motion! = make_surge_motion(x_ref; A=A_surge, f=f_surge, ϕ=ϕ_surge)
+
 body = MovingBody(x_ref, fill(ds, n_ib), motion!)
 
 
 # %%
-dt = 0.002
+dt = 0.001
 Re = 200.0
-u0 = UniformFlow(t -> SA[1.0, 0.0])
+u0 = UniformFlow(t -> SA[0.0, 0.0])
 prob = IBProblem(grid, body, Re, u0);
 
 # %%
@@ -143,9 +148,10 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=4.0, snapshot_freq=100)
+        solution(file; tf=4π, snapshot_freq=100)
     end
 end
+
 
 # %%
 # Using Plots to visualize the vorticity field and save as an animation
@@ -158,36 +164,44 @@ h5open(soln_path, "r") do file
     yidx = ω_start[2]:(ω_start[2] + ny - 1)
 
     ωlim = 7.5
-    r_draw = 0.485; θ = range(0, 2π; length=400)
-    # cx, cy = r .* cos.(θ), r .* sin.(θ)
-    A_heave = 1.0
-    ϕ_heave = 0.0
+
+    # --- plate draw cache (from your x_ref used to build the body) ---
+    x_plate0 = getindex.(x_ref, 1)
+    y_plate0 = getindex.(x_ref, 2)
+
     anim = Animation()
     @showprogress for i in eachindex(t)
-        y0 = A_heave * sin(2π * f_heave * t[i] + ϕ_heave)
-        # circle shifted by y0
-        cx = r_draw .* cos.(θ)
-        cy = y0 .+ r_draw .* sin.(θ)
+
+        # horizontal surge position (matches motion!)
+        xshift = A_surge * sin(2π * f_surge * t[i] + ϕ_surge)
+
         # start a fresh frame
         p = plot(legend=false, aspect_ratio=:equal,
-             xlim=(-2,8), ylim=(-2,2), framestyle=:box)
+                 xlim=(gridlims[1,1], gridlims[1,2]),
+                 ylim=(gridlims[2,1], gridlims[2,2]),
+                 framestyle=:box)
 
         # draw coarse→fine so the finest sits on top
         for lev in nlev:-1:1
             X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
             xvec, yvec = X[:,1], Y[:,1]
             z = ω[:, :, lev, i]
-            # # xvec, yvec from coord; z is Nx×Ny
-            heatmap!(xvec, yvec, z'; aspect_ratio=:equal, colormap=:bwr,
-             xlim=(-2,15), ylim=(-3,3), legend=false, clim = (-ωlim,ωlim))
+
+            heatmap!(xvec, yvec, z';
+                     aspect_ratio=:equal,
+                     colormap=:bwr,
+                     legend=false,
+                     clim=(-ωlim, ωlim))
         end
 
-        plot!(Shape(cx, cy), color=:gray, lw=0)
-        title!(@sprintf("t = %.2f", t[i]))
+        # draw the surging plate
+        plot!(p, x_plate0 .+ xshift, y_plate0; color=:gray, lw=5, label="")
+
+        title!(p, @sprintf("t = %.3f", t[i]))
         frame(anim, p)
     end
 
-    gif(anim, joinpath(OUTDIR, "$(CASE)_vorticity.gif"))
+    gif(anim, joinpath(OUTDIR, "$(CASE)_vorticity.gif"); fps=30)
 end
 
 
