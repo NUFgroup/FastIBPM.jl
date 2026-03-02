@@ -64,7 +64,7 @@ grid = Grid(;
 # --- moving plate body (vertical plate oscillating horizontally) ---
 L_plate = 1.0
 α_plate = π/2              # vertical plate (90 deg)
-x0, y0  = 0.0, 0.5          # same idea as your ibpm example
+x0, y0  = 0.0, 0.0          # same idea as your ibpm example
 
 # choose IB point count so spacing ~ 2h (same spirit as your cylinder block)
 n_ib = max(2, 1 + round(Int, L_plate / (2h)))
@@ -95,15 +95,6 @@ prob = IBProblem(grid, body, Re, u0);
 function solution(file; tf, snapshot_freq)
     T = Float64
     sol = CNAB(prob; dt, delta=FastIBPM.DeltaYang3S2())
-
-    # Perturbation to induce vortex shedding
-    map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
-        x = coord(grid, Loc_ω(3), I)
-        p = x - SA[-0.75, 0]
-        r = 0.25
-        0.5 * (1 - clamp(norm(p) / r, 0, 1))
-    end
-    apply_vorticity!(sol)
 
     i_all = 1:1+round(Int, tf / dt)
     n_all = length(i_all)
@@ -187,11 +178,20 @@ h5open(soln_path, "r") do file
             xvec, yvec = X[:,1], Y[:,1]
             z = ω[:, :, lev, i]
 
-            heatmap!(xvec, yvec, z';
+            # heatmap!(xvec, yvec, z';
+            #          aspect_ratio=:equal,
+            #          colormap=:bwr,
+            #          legend=false,
+            #          clim=(-ωlim, ωlim))
+            
+
+           contourf!(xvec, yvec, z';
                      aspect_ratio=:equal,
                      colormap=:bwr,
+                     levels = 30, 
+                     lw = 0,
                      legend=false,
-                     clim=(-ωlim, ωlim))
+                     clim=(-5, 5))
         end
 
         # draw the surging plate
