@@ -273,7 +273,7 @@ end
 
 # %%
 # Using Plots to visualize lift and drag coefficients with peaks and oscillation bands
-p = plot(legend = :topright, xlabel = "t", ylabel = "", ylims = (-2, 2),
+p = plot(legend = :topright, xlabel = "t", ylabel = "", ylims = (-20, 20),
          framestyle = :box)
 
 for f in (:Cl, :Cd)
