@@ -378,7 +378,7 @@ function update_structure!(
 
     structure_to_fluid_displacement!(ib_deform.u, def.ζ, body, ops)
 
-    for i in 1:nb-1
+    for i in 1:(nb-1)
         ib_deform.ds[i] = norm(ib_deform.x[i+1] - ib_deform.x[i])
     end
     if nb > 1

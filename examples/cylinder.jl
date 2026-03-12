@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # %%
-using FastIBPM
+using Immersa
 using StaticArrays
 using ProgressMeter
 using OffsetArrays
@@ -21,15 +21,16 @@ using Plots
 # You can also change the output format by modifying the argument to
 # '''CairoMakie.activate!''' (e.g., to "png" or "pdf").
 
-
 #CairoMakie.activate!(; type="svg")
 
 # %%
 # Set up output directory
-const _FILEPATH = let f = @__FILE__; isempty(f) ? PROGRAM_FILE : f end
-const CASE     = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
-const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
-const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
+const _FILEPATH = let f = @__FILE__;
+    isempty(f) ? PROGRAM_FILE : f
+end
+const CASE = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
+const SRCDIR = isempty(_FILEPATH) ? pwd() : dirname(_FILEPATH)
+const OUTDIR = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
 # %%
@@ -46,7 +47,7 @@ n_ib = round(Int, S / (2 * h))  # number of immersed boundary points
 ds = S / n_ib  # arclength delta at each point
 
 body = let
-    x = map(range(0, 2π, n_ib + 1)[1:end-1]) do θ
+    x = map(range(0, 2π, n_ib + 1)[1:(end-1)]) do θ
         r * SA[cos(θ), sin(θ)]
     end
     StaticBody(x, fill(ds, n_ib))
@@ -61,7 +62,7 @@ prob = IBProblem(grid, body, Re, u0);
 # %%
 function solution(file; tf, snapshot_freq)
     T = Float64
-    sol = CNAB(prob; dt, delta=FastIBPM.DeltaYang3S2())
+    sol = CNAB(prob; dt, delta=Immersa.DeltaYang3S2())
 
     # Perturbation to induce vortex shedding
     map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
@@ -72,7 +73,7 @@ function solution(file; tf, snapshot_freq)
     end
     apply_vorticity!(sol)
 
-    i_all = 1:1+round(Int, tf / dt)
+    i_all = 1:(1+round(Int, tf/dt))
     n_all = length(i_all)
 
     i_snapshot = i_all[1:snapshot_freq:end]
@@ -90,7 +91,7 @@ function solution(file; tf, snapshot_freq)
     )
     write_attribute(ω, "firstindex", collect(first.(axes(sol.ω[1][3]))))
 
-    @showprogress desc = "solving" for _ in 0:round(Int, tf / dt)
+    @showprogress desc = "solving" for _ in 0:round(Int, tf/dt)
         step!(sol)
 
         f = surface_force_sum(sol)
@@ -126,27 +127,38 @@ h5open(soln_path, "r") do file
     ω = file["snapshots/omega"]
     ω_start = read_attribute(ω, "firstindex")
     nx, ny, nlev, nt = size(ω)
-    xidx = ω_start[1]:(ω_start[1] + nx - 1)
-    yidx = ω_start[2]:(ω_start[2] + ny - 1)
+    xidx = ω_start[1]:(ω_start[1]+nx-1)
+    yidx = ω_start[2]:(ω_start[2]+ny-1)
 
     ωlim = 7.5
-    r = 0.485; θ = range(0, 2π; length=400)
+    r = 0.485;
+    θ = range(0, 2π; length=400)
     cx, cy = r .* cos.(θ), r .* sin.(θ)
-    
+
     anim = Animation()
     @showprogress for i in eachindex(t)
         # start a fresh frame
-        p = plot(legend=false, aspect_ratio=:equal,
-             xlim=(-2,8), ylim=(-2,2), framestyle=:box)
+        p = plot(
+            legend=false, aspect_ratio=:equal, xlim=(-2, 8), ylim=(-2, 2), framestyle=:box
+        )
 
         # draw coarse→fine so the finest sits on top
         for lev in nlev:-1:1
             X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
-            xvec, yvec = X[:,1], Y[:,1]
+            xvec, yvec = X[:, 1], Y[:, 1]
             z = ω[:, :, lev, i]
             # # xvec, yvec from coord; z is Nx×Ny
-            heatmap!(xvec, yvec, z'; aspect_ratio=:equal, colormap=:bwr,
-             xlim=(-2,15), ylim=(-3,3), legend=false, clim = (-ωlim,ωlim))
+            heatmap!(
+                xvec,
+                yvec,
+                z';
+                aspect_ratio=:equal,
+                colormap=:bwr,
+                xlim=(-2, 15),
+                ylim=(-3, 3),
+                legend=false,
+                clim=(-ωlim, ωlim),
+            )
         end
 
         plot!(Shape(cx, cy), color=:gray, lw=0)
@@ -154,7 +166,7 @@ h5open(soln_path, "r") do file
         frame(anim, p)
     end
 
-    gif(anim, joinpath(OUTDIR, "$(CASE)_vorticity.gif"), fps=30)
+    gif(anim, joinpath(OUTDIR, "$(CASE)_vorticity.gif"); fps=30)
 end
 
 # %%
@@ -224,8 +236,7 @@ end
 
 # %%
 # Using Plots to visualize lift and drag coefficients with peaks and oscillation bands
-p = plot(legend = :topright, xlabel = "t", ylabel = "", ylims = (-2, 2),
-         framestyle = :box)
+p = plot(; legend=:topright, xlabel="t", ylabel="", ylims=(-2, 2), framestyle=:box)
 
 for f in (:Cl, :Cd)
     t = results.t

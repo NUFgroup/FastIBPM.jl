@@ -243,7 +243,6 @@ This is a half-cell offset *along* the edge's direction `i`.
 """
 _cellcoord((; i)::Edge{Dual}, ::Val{N}) where {N} = SVector(ntuple(==(i), N)) / 2
 
-
 """
     struct IncludeBoundary end
 
@@ -273,7 +272,7 @@ Determines the iterable index ranges for a grid location, *including* boundaries
 - `Tuple` of `UnitRange`: Index ranges (e.g., `(0:n[1], 0:n[2]-1)`).
 """
 function cell_axes(n::SVector{N}, loc::Edge, ::IncludeBoundary) where {N}
-    ntuple(j -> _on_bndry(loc, j) ? (0:n[j]) : (0:n[j]-1), Val(N))
+    ntuple(j -> _on_bndry(loc, j) ? (0:n[j]) : (0:(n[j]-1)), Val(N))
 end
 
 """
@@ -290,7 +289,7 @@ Determines the iterable index ranges for a grid location, *excluding* boundaries
 - `Tuple` of `UnitRange`: Index ranges for the interior (e.g., `(1:n[1]-1, 0:n[2]-1)`).
 """
 function cell_axes(n::SVector{N}, loc::Edge, ::ExcludeBoundary) where {N}
-    ntuple(j -> _on_bndry(loc, j) ? (1:n[j]-1) : (0:n[j]-1), Val(N))
+    ntuple(j -> _on_bndry(loc, j) ? (1:(n[j]-1)) : (0:(n[j]-1)), Val(N))
 end
 
 """

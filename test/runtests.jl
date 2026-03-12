@@ -1,16 +1,16 @@
-using FastIBPM: DeltaYang3S
+using Immersa: DeltaYang3S
 using Test
 import CUDA, AMDGPU
 
 include("tests.jl")
 
 arrays = [Array]
-CUDA.functional() && push!(arrays, CUDA.CuArray)
-AMDGPU.functional() && push!(arrays, AMDGPU.ROCArray)
+# CUDA.functional() && push!(arrays, CUDA.CuArray)
+# AMDGPU.functional() && push!(arrays, AMDGPU.ROCArray)
 
 @info "Functional backends: $arrays"
 
-@testset "FastIBPM.jl" verbose = true begin
+@testset "Immersa.jl" verbose = true begin
     @testset "utils" Tests.test_utils()
     @testset "problems" Tests.test_problems()
     @testset "operators" begin

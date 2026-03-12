@@ -1,18 +1,12 @@
 """
 This module provides numerical operators and transforms for the immersed boundary projection method (IBPM).
 
-This file defines the main computational operators used in FastIBPM, including
+This file defines the main computational operators used in Immersa, including
 nonlinear advection terms, FFT-based Laplacian solvers, multilevel grid
 coarsening and interpolation, and boundary condition utilities. It also includes
 delta-function kernels and regularization structures used for coupling between
 the fluid grid and immersed bodies.
 """
-
-
-
-
-
-
 
 """
     nonlinear!(nonlin, u, ω)
@@ -45,8 +39,6 @@ function nonlinear!(nonlin, u, ω)
     nonlin
 end
 
-
-
 """
     nonlinear(i, u, ω, I)
 
@@ -73,8 +65,6 @@ function nonlinear(i, u, ω, I)
         uI * ωI
     end
 end
-
-
 
 """
     rot!(ω, u; h)
@@ -104,8 +94,6 @@ function rot!(ω, u; h)
     ω
 end
 
-
-
 """
     rot(i, u, I; h)
 
@@ -131,8 +119,6 @@ function rot(i, u, I; h)
         (u[k][I] - u[k][I-δ(j)]) / h
     end
 end
-
-
 
 """
     curl!(u, ψ; h)
@@ -162,8 +148,6 @@ function curl!(u, ψ; h)
     u
 end
 
-
-
 """
     curl(i, ψ, I; h)
 
@@ -188,8 +172,6 @@ function curl(i, ψ, I; h)
         (ψ[k][I+δ(j)] - ψ[k][I]) / h
     end
 end
-
-
 
 """
     struct LaplacianPlan
@@ -247,8 +229,6 @@ function LaplacianPlan(ωᵢ, i, n::SVector{N}) where {N}
     LaplacianPlan(λ, similar(ωᵢ), fwd, inv, n_logical)
 end
 
-
-
 """
     laplacian_fft_kind(i, nd)
 
@@ -266,8 +246,6 @@ Return a tuple specifying the FFT type to use along each dimension of a multidim
 - `RODFT00` (DST-I) is typically used for Dirichlet (zero-value) boundary conditions.	
 """
 laplacian_fft_kind(i, nd) = ntuple(j -> i == j ? FFTW.REDFT01 : FFTW.RODFT00, nd)
-
-
 
 """
     laplacian_eigvals!(λ, i)
@@ -305,8 +283,6 @@ function laplacian_eigvals!(λ, i)
     λ
 end
 
-
-
 """
     laplacian_plans(ω, n)
 
@@ -324,8 +300,6 @@ Create a Laplacian plan for each component of a vector field ω.
 - Useful when different components require different FFT types due to mixed boundary conditions
 """
 laplacian_plans(ω, n) = map(i -> LaplacianPlan(ω[i], i, n), tupleindices(ω))
-
-
 
 """
     EigenbasisTransform
@@ -374,8 +348,6 @@ function (X::EigenbasisTransform)(yᵢ, ωᵢ, i)
     _set!(yᵢ, plan.work)
 end
 
-
-
 """
     _coarse_indices(n::NTuple{N}, loc::Edge{Dual}) where {N}
 
@@ -395,11 +367,9 @@ A tuple of index ranges corresponding to the coarse grid coordinates.
 function _coarse_indices(n::NTuple{N}, loc::Edge{Dual}) where {N}
     ntuple(N) do i
         n4 = n[i] .÷ 4
-        i == loc.i ? (n4:3n4-1) : (n4+1:3n4-1)
+        i == loc.i ? (n4:(3n4-1)) : ((n4+1):(3n4-1))
     end
 end
-
-
 
 """
     multidomain_coarsen!(ω², ω¹; n)
@@ -426,8 +396,6 @@ function multidomain_coarsen!(ω², ω¹; n)
     end
     ω²
 end
-
-
 
 """
     multidomain_coarsen(i, ωᵢ, I²; n)
@@ -458,8 +426,6 @@ function multidomain_coarsen(i, ωᵢ, I²; n)
     s / length(indices)
 end
 
-
-
 """
     _coarsen_stencil(T)
 
@@ -483,8 +449,6 @@ function _coarsen_stencil(T)
         1 2 1
     ]) / T(16)
 end
-
-
 
 """
     _fine_indices(i, n, I)
@@ -516,8 +480,6 @@ function _fine_indices(i, n::NTuple{3}, I::NTuple{3})
     end
 end
 
-
-
 """
     _fine_range(n, I)
 
@@ -537,8 +499,6 @@ A `UnitRange` of three fine-grid indices corresponding to the coarse-grid index 
 function _fine_range(n::Int, I::Int)
     2(I - (n ÷ 4)) .+ (-1:1)
 end
-
-
 
 """
     multidomain_interpolate!(ωb, ω; n)
@@ -567,8 +527,6 @@ function multidomain_interpolate!(ωb, ω; n)
     end
     ωb
 end
-
-
 
 """
     multidomain_interpolate(ωᵢ, (i, j, k), dir, I¹; n)
@@ -621,8 +579,6 @@ function multidomain_interpolate(ωᵢ, (i, j, k), dir, I¹::CartesianIndex{3}; 
     end
 end
 
-
-
 """
     set_boundary!(ω, ωb)
 
@@ -652,8 +608,6 @@ function set_boundary!(ω, ωb)
     end
     ω
 end
-
-
 
 """
     add_laplacian_bc!(Lψ, factor, ψb)
@@ -702,8 +656,6 @@ function add_laplacian_bc!(Lψ, factor, ψb)
     end
 end
 
-
-
 """
     laplacian_bc_ii(ψb, i, dir, I)
 
@@ -733,8 +685,6 @@ function laplacian_bc_ii(ψb, i, dir, I)
     end
     -outward(dir) * s
 end
-
-
 
 """
     multidomain_poisson!(ω, ψ, u, ψb, grid, fft_plan)
@@ -798,8 +748,6 @@ function multidomain_poisson!(ω, ψ, u, ψb, grid::Grid, fft_plan)
     end
 end
 
-
-
 """
     AbstractDeltaFunc
 
@@ -814,8 +762,6 @@ delta(r)  # evaluates as the product of 1D delta values along each component
 abstract type AbstractDeltaFunc end
 
 (delta::AbstractDeltaFunc)(r::AbstractVector) = prod(delta, r)
-
-
 
 """
     DeltaYang3S <: AbstractDeltaFunc
@@ -847,8 +793,6 @@ function (::DeltaYang3S)(r::AbstractFloat)
         zero(r)
     end
 end
-
-
 
 """
     DeltaYang3S2 <: AbstractDeltaFunc
@@ -907,8 +851,6 @@ function (::DeltaYang3S2)(x::Float64)
     end
 end
 
-
-
 """
     Reg{D,T,N,A,M,W}
     Reg(backend, T, delta, nb, Val{N})
@@ -951,13 +893,11 @@ function Reg(backend, T, delta, nb, ::Val{N}) where {N}
     I = KernelAbstractions.zeros(backend, SVector{N,Int}, nb, N)
 
     s = support(delta)
-    r = ntuple(_ -> length(-s:s), N)
+    r = ntuple(_ -> length((-s):s), N)
     weights = KernelAbstractions.zeros(backend, T, r..., nb, N)
 
     Reg(delta, I, weights)
 end
-
-
 
 """
     update_weights!(reg, grid, xbs, ibs)
@@ -1010,8 +950,6 @@ function update_weights!(reg::Reg, grid::Grid{N}, xbs, ibs) where {N}
     reg
 end
 
-
-
 """
     interpolate_body!(ub, reg, u)
 
@@ -1048,15 +986,13 @@ function interpolate_body!(ub, reg::Reg{<:Any,T,N}, u) where {T,N}
         for i in 1:N
             w = @view reg.weights[.., ib, i]
             Ib = reg.I[ib, i]
-            I = CartesianIndices(map(i -> i .+ (-s:s), Tuple(Ib)))
+            I = CartesianIndices(map(i -> i .+ ((-s):s), Tuple(Ib)))
             uᵢ = @view u[i][I]
             ubJ[i] = sum_map(*, w, uᵢ)
         end
         ub[J] = ubJ
     end
 end
-
-
 
 """
     regularize!(fu, reg, fb)

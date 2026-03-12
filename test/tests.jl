@@ -1,7 +1,10 @@
 module Tests
 
-using FastIBPM
-using FastIBPM: @loop, _set!, ArrayPool, with_arrays, with_arrays_like
+using Immersa
+using Immersa: @loop, _set!
+using Immersa.ArrayPools
+using Immersa.OffsetTuples
+using Immersa.Utilities
 using KernelAbstractions
 using GPUArrays
 using OffsetArrays: OffsetArray, no_offset_view
@@ -11,7 +14,7 @@ using Test
 using Random
 
 import FFTW
-import FastIBPM: FFT_R2R
+import Immersa: FFT_R2R
 
 _backend(array) = get_backend(convert(array, [0]))
 
@@ -25,7 +28,7 @@ end
 
 function _gridarray(f, array, grid::Grid{N}, loc::Type{<:Edge}, R; level=1) where {N}
     map(level) do lev
-        map(FastIBPM.edge_axes(Val(N), loc)) do i
+        map(Immersa.edge_axes(Val(N), loc)) do i
             _gridarray(x -> f(x)[i], array, grid, loc(i), R[i]; level=lev)
         end
     end
@@ -33,7 +36,7 @@ end
 
 function _boundary_array(f, array, grid::Grid{N}, loc; kw...) where {N}
     Rb = boundary_axes(grid.n, loc; dims=ntuple(identity, 3))
-    map(FastIBPM.edge_axes(Val(N), loc)) do i
+    map(Immersa.edge_axes(Val(N), loc)) do i
         (SArray ∘ map)(CartesianIndices(Rb[i])) do index
             dir, j = Tuple(index)
             _gridarray(x -> f(x)[i], array, grid, loc(i), Rb[i][dir, j]; kw...)
@@ -98,10 +101,10 @@ _kind_str(kind::Tuple) = string("(", join(FFTW.kind2string.(kind), ", "), ")")
 _kind_str(kind) = FFTW.kind2string(kind)
 
 function test_utils()
-    @test FastIBPM.axisunit(Val(2), 1) == CartesianIndex((1, 0))
-    @test FastIBPM.axisunit(Val(3), 1) == CartesianIndex((1, 0, 0))
-    @test FastIBPM.axisunit(Val(3), 3) == CartesianIndex((0, 0, 1))
-    @test FastIBPM.axisunit(Val(4))(2) == CartesianIndex((0, 1, 0, 0))
+    @test axisunit(Val(2), 1) == CartesianIndex((1, 0))
+    @test axisunit(Val(3), 1) == CartesianIndex((1, 0, 0))
+    @test axisunit(Val(3), 3) == CartesianIndex((0, 0, 1))
+    @test axisunit(Val(4))(2) == CartesianIndex((0, 1, 0, 0))
 
     @test_throws "I in R" @macroexpand1 @loop backend (2 in R) x[I] = y[I]
     @test_throws "I in R" @macroexpand1 @loop backend (in(I, R, S)) x[I] = y[I]
@@ -241,8 +244,8 @@ function test_fft_r2r(array, kind, sz, dimss)
     end
 end
 
-function test_delta_func(δ::FastIBPM.AbstractDeltaFunc)
-    s = FastIBPM.support(δ)
+function test_delta_func(δ::Immersa.AbstractDeltaFunc)
+    s = Immersa.support(δ)
     let r = s .+ 0.5 .+ [0.0, 1e-3, 0.5, 1.0, 100.0]
         @test all(@. δ(r) ≈ 0)
         @test all(@. δ(-r) ≈ 0)
@@ -263,14 +266,14 @@ function test_nonlinear(
 
     nonlin_true(x) = u_true(x) × ω_true(x)
 
-    Ru = map(r -> first(r)-1:last(r)+1, R)
-    Rω = map(r -> first(r):last(r)+1, R)
+    Ru = map(r -> (first(r)-1):(last(r)+1), R)
+    Rω = map(r -> first(r):(last(r)+1), R)
 
     u = _gridarray(u_true, array, grid, Loc_u, ntuple(_ -> Ru, 3))
     ω = _gridarray(ω_true, array, grid, Loc_ω, ntuple(_ -> Rω, 3))
 
     nonlin_expect = _gridarray(nonlin_true, array, grid, Loc_u, ntuple(_ -> R, 3))
-    nonlin_got = FastIBPM.nonlinear!(map(zero, nonlin_expect), u, ω)
+    nonlin_got = Immersa.nonlinear!(map(zero, nonlin_expect), u, ω)
 
     @test all(@. no_offset_view(nonlin_got) ≈ no_offset_view(nonlin_expect))
 
@@ -306,12 +309,12 @@ function test_rot(array, grid::Grid{N}, u_true::LinearFunc{3}, R) where {N}
 
     ω_true(_) = _curl(u_true)
 
-    Ru = map(r -> first(r)-1:last(r), R)
+    Ru = map(r -> (first(r)-1):last(r), R)
 
     u = _gridarray(u_true, array, grid, Loc_u, ntuple(_ -> Ru, 3))
 
     ω_expect = _gridarray(ω_true, array, grid, Loc_ω, ntuple(_ -> R, 3))
-    ω_got = FastIBPM.rot!(map(zero, ω_expect), u; h=grid.h)
+    ω_got = Immersa.rot!(map(zero, ω_expect), u; h=grid.h)
 
     @test all(i -> no_offset_view(ω_got[i]) ≈ no_offset_view(ω_expect[i]), eachindex(ω_got))
 
@@ -345,12 +348,12 @@ function test_curl(array, grid::Grid{N}, ψ_true::LinearFunc{3}, R) where {N}
 
     u_true(_) = _curl(ψ_true)
 
-    Rψ = map(r -> first(r):last(r)+1, R)
+    Rψ = map(r -> first(r):(last(r)+1), R)
 
     ψ = _gridarray(ψ_true, array, grid, Loc_ω, ntuple(_ -> Rψ, 3))
 
     u_expect = _gridarray(u_true, array, grid, Loc_u, ntuple(_ -> R, 3))
-    u_got = FastIBPM.curl!(map(zero, u_expect), ψ; h=grid.h)
+    u_got = Immersa.curl!(map(zero, u_expect), ψ; h=grid.h)
 
     @test all(@. no_offset_view(u_got) ≈ no_offset_view(u_expect))
 
@@ -392,14 +395,14 @@ function test_laplacian_inv(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}) wher
 
     ψ = _gridarray(ψ_true, array, grid, Loc_ω, Rψb)
     for i in eachindex(ψ),
-        (j, _) in FastIBPM.axes_permutations(i),
+        (j, _) in axes_permutations(i),
         Iⱼ in (Rψb[i][j][begin], Rψb[i][j][end])
 
         R = CartesianIndices(setindex(Rψb[i], Iⱼ:Iⱼ, j))
         @loop backend (I in R) ψ[i][I] = 0
     end
 
-    ψ_expect = map(i -> OffsetArray(ψ[i][Rψ[i]...], Rψ[i]), FastIBPM.tupleindices(ψ))
+    ψ_expect = map(i -> OffsetArray(ψ[i][Rψ[i]...], Rψ[i]), tupleindices(ψ))
     ψ_got = map(similar, ψ_expect)
     u = ntuple(N) do i
         dims = Ru[i]
@@ -408,11 +411,11 @@ function test_laplacian_inv(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}) wher
         )
     end
 
-    plan = FastIBPM.laplacian_plans(ψ_got, grid.n)
+    plan = Immersa.laplacian_plans(ψ_got, grid.n)
 
-    FastIBPM.curl!(u, ψ; h=grid.h)
-    FastIBPM.rot!(ψ_got, u; h=grid.h)
-    FastIBPM.EigenbasisTransform(λ -> -1 / (λ / grid.h^2), plan)(ψ_got, ψ_got)
+    Immersa.curl!(u, ψ; h=grid.h)
+    Immersa.rot!(ψ_got, u; h=grid.h)
+    Immersa.EigenbasisTransform(λ -> -1 / (λ / grid.h^2), plan)(ψ_got, ψ_got)
 
     @test all(i -> no_offset_view(ψ_got[i]) ≈ no_offset_view(ψ_expect[i]), eachindex(ψ_got))
 
@@ -449,13 +452,13 @@ function test_multidomain_coarsen(array, grid::Grid{N}, ω_true::LinearFunc{3}) 
         R_inner = CartesianIndices(
             ntuple(N) do j
                 n4 = grid.n[j] ÷ 4
-                i == j ? (n4:3n4-1) : (n4+1:3n4-1)
+                i == j ? (n4:(3n4-1)) : ((n4+1):(3n4-1))
             end,
         )
         @loop backend (I in R_inner) ω²_got[i][I] = 0
     end
 
-    FastIBPM.multidomain_coarsen!(ω²_got, ω¹; n=grid.n)
+    Immersa.multidomain_coarsen!(ω²_got, ω¹; n=grid.n)
 
     @test all(
         i -> no_offset_view(ω²_got[i]) ≈ no_offset_view(ω²_expect[i]), eachindex(ω²_got)
@@ -490,7 +493,7 @@ function test_multidomain_interpolate(array, grid::Grid{N}, ω_true::LinearFunc{
     ω_b_expect = _boundary_array(ω_true, array, grid, Loc_ω; level=1)
     ω_b_got = map(a -> map(zero, a), ω_b_expect)
 
-    FastIBPM.multidomain_interpolate!(ω_b_got, ω; n=grid.n)
+    Immersa.multidomain_interpolate!(ω_b_got, ω; n=grid.n)
 
     @test all(
         i -> all(@. no_offset_view(ω_b_got[i]) ≈ no_offset_view(ω_b_expect[i])),
@@ -536,7 +539,7 @@ function test_set_boundary(array, grid::Grid{N}, ω_true::LinearFunc{3}) where {
 
     ω_b = _boundary_array(ω_true, array, grid, Loc_ω; level=1)
 
-    FastIBPM.set_boundary!(ω_got, ω_b)
+    Immersa.set_boundary!(ω_got, ω_b)
 
     @test all(i -> no_offset_view(ω_got[i]) ≈ no_offset_view(ω_expect[i]), eachindex(ω_got))
 
@@ -582,7 +585,7 @@ function test_multidomain_poisson(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}
 
     let lev = grid.levels,
         h = gridstep(grid, lev),
-        ui = map(FastIBPM.tupleindices(u[lev])) do i
+        ui = map(tupleindices(u[lev])) do i
             R = CartesianIndices(Base.IdentityUnitRange.(Rue[i]))
             @view u[lev][i][R]
         end
@@ -595,15 +598,15 @@ function test_multidomain_poisson(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}
             end
         end
 
-        FastIBPM.curl!(ui, ψ_expect[lev]; h)
-        FastIBPM.rot!(ω[lev], u[lev]; h)
+        Immersa.curl!(ui, ψ_expect[lev]; h)
+        Immersa.rot!(ω[lev], u[lev]; h)
     end
 
     for lev in 2:grid.levels, (i, ωᵢ) in pairs(ω[lev])
         R_inner = CartesianIndices(
             ntuple(N) do j
                 n4 = grid.n[j] ÷ 4
-                i == j ? (n4:3n4-1) : (n4+1:3n4-1)
+                i == j ? (n4:(3n4-1)) : ((n4+1):(3n4-1))
             end,
         )
         @loop backend (I in R_inner) ωᵢ[I] = 999
@@ -611,9 +614,9 @@ function test_multidomain_poisson(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}
 
     ψ_b = _boundary_array(_ -> zero(SVector{3}), array, grid, Loc_ω)
 
-    plan = FastIBPM.laplacian_plans(ω[1], grid.n)
+    plan = Immersa.laplacian_plans(ω[1], grid.n)
 
-    FastIBPM.multidomain_poisson!(ω, ψ_got, u, ψ_b, grid, plan)
+    Immersa.multidomain_poisson!(ω, ψ_got, u, ψ_b, grid, plan)
 
     @test all(eachindex(ψ_got)) do level
         all(eachindex(ψ_got[level])) do i
@@ -649,8 +652,8 @@ function test_regularization(
     T = Float64
     nb = length(xb)
 
-    reg = FastIBPM.Reg(backend, T, FastIBPM.DeltaYang3S(), nb, Val(N))
-    FastIBPM.update_weights!(reg, grid, xb, eachindex(xb))
+    reg = Immersa.Reg(backend, T, Immersa.DeltaYang3S(), nb, Val(N))
+    Immersa.update_weights!(reg, grid, xb, eachindex(xb))
 
     R = ntuple(i -> cell_axes(grid, Loc_u(i), ExcludeBoundary()), N)
 
@@ -658,14 +661,14 @@ function test_regularization(
 
     ub_expect = map(x -> u_true(x)[1:N], Array(xb))
     ub_got = KernelAbstractions.zeros(backend, SVector{N,T}, nb)
-    FastIBPM.interpolate_body!(ub_got, reg, u)
+    Immersa.interpolate_body!(ub_got, reg, u)
 
     @test Array(ub_got) ≈ ub_expect
 
     fu = _gridarray(x -> zero(SVector{N}), array, grid, Loc_u, R)
     fb = KernelAbstractions.allocate(backend, SVector{N,T}, nb)
     fill!(fb, 1 .+ zero(SVector{N,T}))
-    FastIBPM.regularize!(fu, reg, fb)
+    Immersa.regularize!(fu, reg, fb)
 
     @test all(@. sum(no_offset_view(fu)) ≈ nb)
 
@@ -707,7 +710,7 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
     u_work = grid_zeros(backend, grid, Loc_u, ExcludeBoundary())
 
     ω_work_bounds = grid_zeros(backend, grid, Loc_ω, IncludeBoundary())
-    ω_work = FastIBPM.grid_view(ω_work_bounds, grid, Loc_ω, ExcludeBoundary())
+    ω_work = Immersa.grid_view(ω_work_bounds, grid, Loc_ω, ExcludeBoundary())
 
     f_work = similar(sol.f_tilde)
 
@@ -722,15 +725,15 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
         s
     end
 
-    FastIBPM.interpolate_body!(f_work, sol.reg, sol.u[1])
+    Immersa.interpolate_body!(f_work, sol.reg, sol.u[1])
     unflatten(x) = reinterpret(reshape, T, x)
     @test unflatten(f_work) ≈ unflatten(sol.points.u) atol = 1e-4
 
-    ω = FastIBPM.grid_view(deepcopy(sol0[end].ω), grid, Loc_ω, ExcludeBoundary())
+    ω = Immersa.grid_view(deepcopy(sol0[end].ω), grid, Loc_ω, ExcludeBoundary())
 
     for i_step in eachindex(sol0)
-        FastIBPM.nonlinear!(u_work, sol0[i_step].u, sol0[i_step].ω)
-        FastIBPM.rot!(ω_work, u_work; h=grid.h)
+        Immersa.nonlinear!(u_work, sol0[i_step].u, sol0[i_step].ω)
+        Immersa.rot!(ω_work, u_work; h=grid.h)
         for i in eachindex(ω)
             let ω = ω[i], ω_work = ω_work[i], k = sol.dt * sol.β[i_step]
                 @loop backend (I in CartesianIndices(ω)) ω[I] += k * ω_work[I]
@@ -744,8 +747,8 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
         end
     end
 
-    FastIBPM.curl!(u_work, ω_work_bounds; h=grid.h)
-    FastIBPM.rot!(ω_work, u_work; h=grid.h)
+    Immersa.curl!(u_work, ω_work_bounds; h=grid.h)
+    Immersa.rot!(ω_work, u_work; h=grid.h)
 
     for i in eachindex(ω)
         let ω = ω[i], ω_work = ω_work[i], k = sol.dt / (2sol.prob.Re)
@@ -753,8 +756,8 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
         end
     end
 
-    FastIBPM.regularize!(u_work, sol.reg, sol.f_tilde)
-    FastIBPM.rot!(ω_work, u_work; h=grid.h)
+    Immersa.regularize!(u_work, sol.reg, sol.f_tilde)
+    Immersa.rot!(ω_work, u_work; h=grid.h)
 
     for i in eachindex(ω)
         let ω = ω[i], ω_work = ω_work[i]
@@ -762,7 +765,7 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
         end
     end
 
-    let ω_got = FastIBPM.grid_view(sol.ω[1], grid, Loc_ω, ExcludeBoundary()), ω_expect = ω
+    let ω_got = Immersa.grid_view(sol.ω[1], grid, Loc_ω, ExcludeBoundary()), ω_expect = ω
         @test all(eachindex(ω_got)) do i
             approx = OffsetArray(
                 KernelAbstractions.zeros(backend, Bool, size(ω_got[i])...), axes(ω_got[i])
@@ -783,7 +786,7 @@ function test_cnab(array, ::Val{2})
     let grid = Grid(; h=0.1, n=(40, 40), x0=(-2.0, -1.95), levels=3),
         nb = 20,
         ds = fill(2π / nb, nb),
-        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:end-1]) do t
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
             SVector(cos(t), sin(t))
         end,
         body = StaticBody(xb, ds),
@@ -840,7 +843,7 @@ function test_cnab_io(sol::CNAB)
     end
 
     io = IOBuffer()
-    FastIBPM.save(io, sol)
+    Immersa.save(io, sol)
 
     sol.i = -1
     sol.t = NaN
@@ -859,7 +862,7 @@ function test_cnab_io(sol::CNAB)
     end
 
     seekstart(io)
-    FastIBPM.load!(io, sol)
+    Immersa.load!(io, sol)
 
     @test sol.i == sol_i
     @test sol.t == sol_t

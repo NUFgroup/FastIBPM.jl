@@ -14,14 +14,12 @@ support custom FFT-based operations for real-valued arrays.
 """
 module FFT_R2R
 
-
-
 # ------------------------------------------------------------------------
 # Dependencies
 # ------------------------------------------------------------------------
 
 # For mul! and other matrix operations
-using LinearAlgebra 
+using LinearAlgebra
 
 # For backend dispatching (CPU/GPU)
 using KernelAbstractions
@@ -32,8 +30,6 @@ import AbstractFFTs
 import FFTW
 
 # ------------------------------------------------------------------------
-
-
 
 """
     plan_r2r!(A, args...; kw...)
@@ -68,8 +64,6 @@ struct R2R{P<:Tuple} # Defines a container for a tuple of FFT plans
     p::P
 end
 
-
-
 """
     bad_plan_r2r(A, args...; kw...)
 
@@ -82,8 +76,6 @@ function bad_plan_r2r!(A, kind::Tuple, dims::Tuple=ntuple(identity, ndims(A)); k
     p = ntuple(i -> bad_plan_r2r!(A, kind[i], dims[i]; kw...), ndims(A))
     R2R(p)
 end
-
-
 
 """
     LinearAlgebra.mul!(y, (; p), x)
@@ -98,8 +90,6 @@ function LinearAlgebra.mul!(y, (; p)::R2R, x)
     end
     y
 end
-
-
 
 """
     RODFT00{P,A,B}
@@ -117,8 +107,6 @@ struct RODFT00{P<:AbstractFFTs.Plan,A<:AbstractArray,B<:AbstractArray}
     a::A
     b::B
 end
-
-
 
 """
     bad_plan_r2r!(A, ::Val{FFTW.RODFT00}, dims; kw...)
@@ -145,8 +133,6 @@ function bad_plan_r2r!(A, ::Val{FFTW.RODFT00}, dims::Int; kw...)
     RODFT00(dims, p, a, b)
 end
 
-
-
 """
     LinearAlgebra.mul!(y, (; dims, p, a, b)::RODFT00, x)
 
@@ -166,8 +152,6 @@ function LinearAlgebra.mul!(y, (; dims, p, a, b)::RODFT00, x)
     y
 end
 
-
-
 """
     REDFT10{P,A,B}
 
@@ -184,8 +168,6 @@ struct REDFT10{P<:AbstractFFTs.Plan,A<:AbstractArray,B<:AbstractArray}
     a::A
     b::B
 end
-
-
 
 """
     bad_plan_r2r!(A, ::Val{FFTW.REDFT10}, dims; kw...)
@@ -212,8 +194,6 @@ function bad_plan_r2r!(A, ::Val{FFTW.REDFT10}, dims::Int; kw...)
     REDFT10(dims, p, a, b)
 end
 
-
-
 """
     LinearAlgebra.mul!(y, (; dims, p, a, b)::REDFT10, x)
 
@@ -223,17 +203,15 @@ Mirrors `x`, applies FFT plan `p`, then multiplies by a phase factor to match th
 function LinearAlgebra.mul!(y, (; dims, p, a, b)::REDFT10, x)
     n = size(x, dims)
     selectdim(a, dims, 1:n) .= x
-    selectdim(a, dims, n+1:2n) .= selectdim(x, dims, n:-1:1)
+    selectdim(a, dims, (n+1):2n) .= selectdim(x, dims, n:-1:1)
     mul!(b, p, a)
 
-    k = reshape(0:n-1, ntuple(i -> i == dims ? n : 1, ndims(x)))
+    k = reshape(0:(n-1), ntuple(i -> i == dims ? n : 1, ndims(x)))
     let b1 = selectdim(b, dims, 1:n)
         @. y = real(exp(-1im * π * k / (2n)) * b1)
     end
     y
 end
-
-
 
 """
     REDFT01{P,A,B}
@@ -251,8 +229,6 @@ struct REDFT01{P<:AbstractFFTs.Plan,A<:AbstractArray,B<:AbstractArray}
     a::A
     b::B
 end
-
-
 
 """
     bad_plan_r2r!(A, ::Val{FFTW.REDFT01}, dims; kw...)
@@ -279,8 +255,6 @@ function bad_plan_r2r!(A, ::Val{FFTW.REDFT01}, dims::Int; kw...)
     REDFT01(dims, p, a, b)
 end
 
-
-
 """
     LinearAlgebra.mul!(y, (; dims, p, a, b)::REDFT01, x)
 
@@ -289,11 +263,11 @@ Pre-multiplies `x` by a phase factor, applies FFT plan `p`, and extracts the pro
 """
 function LinearAlgebra.mul!(y, (; dims, p, a, b)::REDFT01, x)
     n = size(x, dims)
-    k = reshape(0:n-1, ntuple(i -> i == dims ? n : 1, ndims(x)))
+    k = reshape(0:(n-1), ntuple(i -> i == dims ? n : 1, ndims(x)))
     let a1 = selectdim(a, dims, 1:n)
         @. a1 = exp(-1im * π * k / (2n)) * x
     end
-    selectdim(a, dims, n+1:2n) .= 0
+    selectdim(a, dims, (n+1):2n) .= 0
     mul!(b, p, a)
 
     let b1 = selectdim(b, dims, 1:n), x1 = selectdim(x, dims, 1:1)

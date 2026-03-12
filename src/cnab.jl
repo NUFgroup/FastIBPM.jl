@@ -17,7 +17,6 @@ An abstract type that serves as a base for all coupling strategies used in CNAB-
 """
 abstract type AbstractCoupler end
 
-
 """
     NothingCoupler
 
@@ -32,7 +31,6 @@ None.
 An instance of `NothingCoupler`, indicating that no coupling is applied during the simulation.
 """
 struct NothingCoupler <: AbstractCoupler end
-
 
 """
     PrescribedBodyCoupler{M}
@@ -50,7 +48,6 @@ An instance of `PrescribedBodyCoupler` suitable for simulations where body motio
 struct PrescribedBodyCoupler{M} <: AbstractCoupler
     Binv::M
 end
-
 
 """
     FsiCoupler{T,O<:GeometricNonlinearBodyOperators,B}
@@ -106,8 +103,6 @@ function FsiCoupler(
 
     FsiCoupler(; state, ops, tol, bicgstabl_args, maxiter)
 end
-
-
 
 """
     CNAB{N,T,B,U,P,R<:Reg,C<:AbstractCoupler,Au,Aω,Vb,BP<:BodyPoints,A<:ArrayPool,W}
@@ -235,7 +230,7 @@ function CNAB(
         f_tilde=KernelAbstractions.zeros(backend, SVector{N,T}, n_ib),
         f=KernelAbstractions.zeros(backend, SVector{N,T}, n_ib),
         points=BodyPoints{N,T}(backend, n_ib),
-        nonlin=map(1:n_step-1) do _
+        nonlin=map(1:(n_step-1)) do _
             grid_zeros(backend, grid, Loc_ω, ExcludeBoundary(); levels=1:grid.levels)
         end,
         nonlin_count=0,
@@ -250,8 +245,6 @@ function CNAB(
 
     sol
 end
-
-
 
 """
     initial_sol(backend, body, sol_args, coupler_args)
@@ -351,8 +344,6 @@ function initial_sol(
     sol
 end
 
-
-
 """
     zero_vorticity!(sol::CNAB)
 
@@ -390,8 +381,6 @@ function zero_vorticity!(sol::CNAB)
     sol
 end
 
-
-
 """
     set_time!(sol::CNAB, i::Integer)
 
@@ -417,8 +406,6 @@ function set_time!(sol::CNAB, i::Integer)
     sol.t = sol.t0 + sol.dt * (i - 1)
     sol
 end
-
-
 
 """
     step!(sol::CNAB)
@@ -451,8 +438,6 @@ function step!(sol::CNAB)
     sol
 end
 
-
-
 """
     update_reg!(sol::CNAB, body, i)
 
@@ -483,8 +468,6 @@ function update_reg!(sol::CNAB, ::AbstractPrescribedBody, i)
     update_weights!(sol.reg, sol.prob.grid, sol.points.x, i)
 end
 
-
-
 """
     _A_factor(sol::CNAB)
 
@@ -502,8 +485,6 @@ viscous term and is given by:
 - Diffusion coefficient (same numeric type as `sol.dt`).
 """
 _A_factor(sol::CNAB) = sol.dt / (2sol.prob.Re)
-
-
 
 """
     Ainv(sol::CNAB, level)
@@ -524,8 +505,6 @@ function Ainv(sol::CNAB, level)
     a = _A_factor(sol)
     EigenbasisTransform(λ -> 1 / (1 - a * λ / h^2), sol.plan)
 end
-
-
 
 """
     prediction_step!(sol::CNAB)
@@ -619,8 +598,6 @@ function prediction_step!(sol::CNAB{N,T}, level, u_work) where {N,T}
     Ainv(sol, level)(ωˢ, ωˢ)
 end
 
-
-
 """
     coupling_step!(sol::CNAB)
 
@@ -668,8 +645,6 @@ function _coupling_step!(sol::CNAB, coupler::PrescribedBodyCoupler, rhs, ψ_b_wo
     coupler.Binv(sol.f_tilde, rhs, sol)
 end
 
-
-
 """
 CNAB_Binv_Precomputed(B)
 
@@ -700,7 +675,6 @@ function (x::CNAB_Binv_Precomputed)(f, u_ib, ::CNAB{N,T}) where {N,T}
     end
 end
 
-
 # Arturo: Add struct and function for moving bodies
 
 Base.@kwdef struct CNAB_Binv_Iterative{T}
@@ -710,20 +684,19 @@ end
 
 function (op::CNAB_Binv_Iterative{T})(f, rhs, sol::CNAB{N,T}) where {N,T}
     n_ib = point_count(sol.prob.body)
-    n    = N * n_ib
+    n = N * n_ib
 
     # y := B*x with current geometry (uses your existing B_rigid_mul!)
     Bmap = LinearMap(n; ismutating=true) do y, x
-        B_rigid_mul!(reinterpret(SVector{N,T}, y),
-                     reinterpret(SVector{N,T}, x), sol)
+        B_rigid_mul!(reinterpret(SVector{N,T}, y), reinterpret(SVector{N,T}, x), sol)
     end
 
     # Solve B f = rhs, warm-started by current contents of f
-    bicgstabl!(reinterpret(T, f), Bmap, reinterpret(T, rhs);
-               abstol=op.abstol, reltol=op.reltol)
+    bicgstabl!(
+        reinterpret(T, f), Bmap, reinterpret(T, rhs); abstol=op.abstol, reltol=op.reltol
+    )
     nothing
 end
-
 
 """
     B_inverse_rigid(sol::CNAB{N,T,<:AbstractStaticBody})
@@ -773,8 +746,6 @@ function B_rigid_mul!(u_ib::AbstractVector{<:Number}, f, sol::CNAB{N,T}) where {
 
     u_ib
 end
-
-
 
 """
     B_rigid_mul!(u_ib, f, sol::CNAB{N,T})
@@ -826,8 +797,6 @@ function B_rigid_mul!(u_ib, f, sol::CNAB{N,T}) where {N,T}
         interpolate_body!(u_ib, sol.reg, u¹)
     end
 end
-
-
 
 """
     _coupling_step!(sol::CNAB, coupler::FsiCoupler)
@@ -967,8 +936,6 @@ function _coupling_step!(sol::CNAB{N,T}, coupler::FsiCoupler, fs, χs, ψ_b_work
     nothing
 end
 
-
-
 """
     B_deform_mul!(u_ib, f, sol::CNAB)
 
@@ -1028,8 +995,6 @@ function B_deform_mul!(u_ib, f, sol::CNAB, f_work, f1, f2)
     u_ib
 end
 
-
-
 """
     f_to_f_tilde!(f, sol::CNAB; inverse=false)
 
@@ -1074,8 +1039,6 @@ function f_to_f_tilde!(f, sol::CNAB; inverse=false)
     end
 end
 
-
-
 """
     redist!(f, sol::CNAB)
 
@@ -1104,8 +1067,6 @@ function redist!(f, sol::CNAB{N,T}) where {N,T}
         interpolate_body!(f, sol.reg, u_work)
     end
 end
-
-
 
 """
     update_redist_weights!(sol::CNAB; tol=1e-10)
@@ -1139,8 +1100,6 @@ function update_redist_weights!(sol::CNAB{N,T}; tol=T(1e-10)) where {N,T}
         end
     end
 end
-
-
 
 """
     projection_step!(sol::CNAB)
@@ -1181,8 +1140,6 @@ function projection_step!(sol::CNAB{N,T}) where {N,T}
         end
     end
 end
-
-
 
 """
     apply_vorticity!(sol::CNAB)
@@ -1225,8 +1182,6 @@ function apply_vorticity!(sol::CNAB, ψ_b_work)
     end
 end
 
-
-
 """
     ab_coeffs(T, n)
 
@@ -1262,8 +1217,6 @@ function ab_coeffs(T, n)
     end
 end
 
-
-
 """
     _f_tilde_factor(sol)
 
@@ -1289,8 +1242,6 @@ function _f_tilde_factor(sol::CNAB{N}) where {N}
     -grid.h^N / sol.dt
 end
 
-
-
 """
     surface_force!(f, sol)
 
@@ -1315,8 +1266,6 @@ function surface_force!(f, sol::CNAB)
     @. f = -k * sol.f_tilde
 end
 
-
-
 """
     surface_force_sum(sol)
 
@@ -1339,19 +1288,15 @@ function surface_force_sum(sol::CNAB)
     -k * sum(sol.f_tilde)
 end
 
-
-
 """
     const CNAB_signature
 
 A compile-time constant used as a unique identifier for the `CNAB` structure.
-It stores the string `FastIBPM.jl:CNAB` as a vector of bytes (`Vector{UInt8}`).
+It stores the string `Immersa.jl:CNAB` as a vector of bytes (`Vector{UInt8}`).
 
 This signature can be used, for example, in type-checking, serialization, or validation routines.
 """
-const CNAB_signature = Vector{UInt8}("FastIBPM.jl:CNAB")
-
-
+const CNAB_signature = Vector{UInt8}("Immersa.jl:CNAB")
 
 """
     save(io::IO, sol::CNAB)
@@ -1406,8 +1351,6 @@ function save(io::IO, sol::CNAB{N,T}) where {N,T}
 
     nothing
 end
-
-
 
 """
     load!(io::IO, sol::CNAB)

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 # =========================================================
-# FastIBPM example: Flow past a NACA 4-digit airfoil
+# Immersa example: Flow past a NACA 4-digit airfoil
 # (airfoil points re-sampled so ds ≈ 2h and constant, like cylinder)
 # =========================================================
 
-using FastIBPM
+using Immersa
 using StaticArrays
 using ProgressMeter
 using OffsetArrays
@@ -18,18 +18,26 @@ using Plots
 # ---------------------------------------------------------
 # Output directory setup
 # ---------------------------------------------------------
-const _FILEPATH = let f = @__FILE__; isempty(f) ? PROGRAM_FILE : f end
-const CASE     = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
-const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
-const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
+const _FILEPATH = let f = @__FILE__;
+    isempty(f) ? PROGRAM_FILE : f
+end
+const CASE = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
+const SRCDIR = isempty(_FILEPATH) ? pwd() : dirname(_FILEPATH)
+const OUTDIR = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
 # ---------------------------------------------------------
 # NACA 4-digit geometry helper (dense curve generation)
 # ---------------------------------------------------------
-function naca4_body(code::AbstractString; chord=1.0, n=300, closed_te=false,
-                    xshift=0.0, yshift=0.0, alpha=0.0)
-
+function naca4_body(
+    code::AbstractString;
+    chord=1.0,
+    n=300,
+    closed_te=false,
+    xshift=0.0,
+    yshift=0.0,
+    alpha=0.0,
+)
     @assert length(code) == 4 "NACA 4-digit code must have 4 characters, e.g. \"0012\" or \"2412\"."
 
     d = collect(code)
@@ -76,13 +84,13 @@ function naca4_body(code::AbstractString; chord=1.0, n=300, closed_te=false,
     # Build CLOSED contour:
     # TE -> along upper to LE, then along lower back to TE (avoid duplicating TE/LE)
     upper = [SA[chord*xu[i], chord*yu[i]] for i in reverse(eachindex(xu))]
-    lower = [SA[chord*xl[i], chord*yl[i]] for i in eachindex(xl)[2:end-1]]
+    lower = [SA[chord*xl[i], chord*yl[i]] for i in eachindex(xl)[2:(end-1)]]
     pts = vcat(upper, lower)
 
     # rotate + translate
     if alpha != 0.0
         ca, sa = cos(alpha), sin(alpha)
-        R(p) = SA[ca*p[1] - sa*p[2], sa*p[1] + ca*p[2]]
+        R(p) = SA[ca*p[1]-sa*p[2], sa*p[1]+ca*p[2]]
         pts = [R(p) for p in pts]
     end
     if xshift != 0.0 || yshift != 0.0
@@ -109,7 +117,7 @@ function resample_closed_uniform_arclength(pts::Vector{SVector{2,T}}, n::Int) wh
     end
     L = s[end]
 
-    st = range(zero(T), L; length=n+1)[1:end-1]  # exclude endpoint to avoid duplicate point
+    st = range(zero(T), L; length=n+1)[1:(end-1)]  # exclude endpoint to avoid duplicate point
 
     out = Vector{SVector{2,T}}(undef, n)
     seg = 1
@@ -132,10 +140,8 @@ end
 # ---------------------------------------------------------
 h = 0.0055
 gridlims = SA[-1.0 1.0; -1.0 1.0]
-grid = Grid(; h,
-    n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)),
-    x0=gridlims[:, 1],
-    levels=5
+grid = Grid(;
+    h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=5
 )
 
 dt = 0.001
@@ -155,16 +161,26 @@ chord = 1.0
 # rotate airfoil about its mid-chord, then translate so mid-chord is at (0,0)
 mid_local = SA[0.5*chord, 0.0]
 ca, sa = cos(alpha), sin(alpha)
-mid_rot = SA[ca*mid_local[1] - sa*mid_local[2], sa*mid_local[1] + ca*mid_local[2]]
+mid_rot = SA[ca*mid_local[1]-sa*mid_local[2], sa*mid_local[1]+ca*mid_local[2]]
 
 # set shifts so the rotated mid-chord ends up at (0,0)
 xshift = -mid_rot[1]
 yshift = -mid_rot[2]
 
-pts_dense, _ = naca4_body(naca_code; chord=chord, n=800, closed_te=false,
-                          alpha=alpha, xshift=xshift, yshift=yshift)
+pts_dense, _ = naca4_body(
+    naca_code;
+    chord=chord,
+    n=800,
+    closed_te=false,
+    alpha=alpha,
+    xshift=xshift,
+    yshift=yshift,
+)
 # perimeter S (like cylinder S = 2πr)
-S = sum(norm(pts_dense[i == length(pts_dense) ? 1 : i+1] - pts_dense[i]) for i in eachindex(pts_dense))
+S = sum(
+    norm(pts_dense[i == length(pts_dense) ? 1 : i+1] - pts_dense[i]) for
+    i in eachindex(pts_dense)
+)
 
 # choose n_ib so ds ≈ 2h
 n_ib = max(40, round(Int, S / (2h)))
@@ -183,21 +199,26 @@ body = StaticBody(pts, fill(ds, n_ib))
 bx = [p[1] for p in body.x]
 by = [p[2] for p in body.x]
 
-pgeo = plot(bx, by;
+pgeo = plot(
+    bx,
+    by;
     aspect_ratio=:equal,
     legend=false,
     framestyle=:box,
-    xlabel="x", ylabel="y",
-    title=@sprintf("NACA %s, α = %.1f°  (n_ib=%d, ds/h=%.2f)", naca_code, alpha_deg, n_ib, ds/h),
+    xlabel="x",
+    ylabel="y",
+    title=@sprintf(
+        "NACA %s, α = %.1f°  (n_ib=%d, ds/h=%.2f)", naca_code, alpha_deg, n_ib, ds/h
+    ),
 )
 
 # close the curve visually
 plot!(pgeo, [bx; bx[1]], [by; by[1]])
 
 # show grid domain box
-x0, x1 = gridlims[1,1], gridlims[1,2]
-y0, y1 = gridlims[2,1], gridlims[2,2]
-plot!(pgeo, [x0,x1,x1,x0,x0], [y0,y0,y1,y1,y0]; lw=1, linestyle=:dash)
+x0, x1 = gridlims[1, 1], gridlims[1, 2]
+y0, y1 = gridlims[2, 1], gridlims[2, 2]
+plot!(pgeo, [x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0]; lw=1, linestyle=:dash)
 
 # mark a reference point (mid-chord in your shifted coords would be near (0,0) if you set it)
 scatter!(pgeo, [0.0], [0.0]; ms=4)
@@ -212,9 +233,8 @@ prob = IBProblem(grid, body, Re, u0)
 # Time integration + HDF5 output
 # ---------------------------------------------------------
 function solution(file; tf, snapshot_freq)
-    
     T = Float64
-    sol = CNAB(prob; dt, delta=FastIBPM.DeltaYang3S2())
+    sol = CNAB(prob; dt, delta=Immersa.DeltaYang3S2())
 
     # Small perturbation to kick-start unsteady wake
     # map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
@@ -225,7 +245,7 @@ function solution(file; tf, snapshot_freq)
     # end
     # apply_vorticity!(sol)
 
-    i_all = 1:1+round(Int, tf / dt)
+    i_all = 1:(1+round(Int, tf/dt))
     n_all = length(i_all)
 
     i_snapshot = i_all[1:snapshot_freq:end]
@@ -238,10 +258,12 @@ function solution(file; tf, snapshot_freq)
 
     snapshot_group = create_group(file, "snapshots")
     t_snapshot = create_dataset(snapshot_group, "t", T, (n_snapshot,))
-    ω = create_dataset(snapshot_group, "omega", T, (size(sol.ω[1][3])..., grid.levels, n_snapshot))
+    ω = create_dataset(
+        snapshot_group, "omega", T, (size(sol.ω[1][3])..., grid.levels, n_snapshot)
+    )
     write_attribute(ω, "firstindex", collect(first.(axes(sol.ω[1][3]))))
 
-    @showprogress desc = "solving" for _ in 0:round(Int, tf / dt)
+    @showprogress desc = "solving" for _ in 0:round(Int, tf/dt)
         step!(sol)
 
         f = surface_force_sum(sol)
@@ -280,8 +302,8 @@ h5open(soln_path, "r") do file
     ω = file["snapshots/omega"]
     ω_start = read_attribute(ω, "firstindex")
     nx, ny, nlev, nt = size(ω)
-    xidx = ω_start[1]:(ω_start[1] + nx - 1)
-    yidx = ω_start[2]:(ω_start[2] + ny - 1)
+    xidx = ω_start[1]:(ω_start[1]+nx-1)
+    yidx = ω_start[2]:(ω_start[2]+ny-1)
 
     ωlim = 4
 
@@ -290,15 +312,28 @@ h5open(soln_path, "r") do file
 
     anim = Animation()
     @showprogress for i in 1:5:2000 #eachindex(t)
-        p = plot(legend=false, aspect_ratio=:equal,
-                 xlim=(-0.6, 6.0), ylim=(-1.8, 1.8), framestyle=:box)
+        p = plot(
+            legend=false,
+            aspect_ratio=:equal,
+            xlim=(-0.6, 6.0),
+            ylim=(-1.8, 1.8),
+            framestyle=:box,
+        )
 
         for lev in 4:-1:1
             X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
             xvec, yvec = X[:, 1], Y[:, 1]
             z = ω[:, :, lev, i]
-            heatmap!(xvec, yvec, z'; aspect_ratio=:equal,
-                     colormap=:bwr, legend=false, clim=(-ωlim, ωlim), cbar = true)
+            heatmap!(
+                xvec,
+                yvec,
+                z';
+                aspect_ratio=:equal,
+                colormap=:bwr,
+                legend=false,
+                clim=(-ωlim, ωlim),
+                cbar=true,
+            )
         end
 
         plot!(Shape(bx, by), color=:gray, lw=0)
@@ -307,7 +342,13 @@ h5open(soln_path, "r") do file
         frame(anim, p)
     end
 
-    gif(anim, joinpath(OUTDIR, "$(CASE)_naca$(naca_code)_a$(round(Int,alpha_deg))deg_vorticity.gif"), fps=30)
+    gif(
+        anim,
+        joinpath(
+            OUTDIR, "$(CASE)_naca$(naca_code)_a$(round(Int,alpha_deg))deg_vorticity.gif"
+        );
+        fps=30,
+    )
 end
 
 # ---------------------------------------------------------
@@ -333,7 +374,7 @@ oscillations = map(peaks) do p
     ((a + b) / 2, (b - a) / 2)
 end
 
-p = plot(legend=:topright, xlabel="t", ylabel="", ylims=(-2, 2), framestyle=:box)
+p = plot(; legend=:topright, xlabel="t", ylabel="", ylims=(-2, 2), framestyle=:box)
 
 for f in (:Cl, :Cd)
     tvec = results.t
@@ -348,4 +389,6 @@ for f in (:Cl, :Cd)
     hline!(p, [μ - A, μ + A]; color=col, linestyle=:dash, label="")
 end
 
-savefig(p, joinpath(OUTDIR, "$(CASE)_naca$(naca_code)_a$(round(Int,alpha_deg))deg_Cl_Cd.png"))
+savefig(
+    p, joinpath(OUTDIR, "$(CASE)_naca$(naca_code)_a$(round(Int,alpha_deg))deg_Cl_Cd.png")
+)

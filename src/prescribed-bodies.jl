@@ -16,7 +16,6 @@ Hierarchy sketch:
 
 """
 
-
 abstract type AbstractPrescribedBody <: AbstractBody end
 
 abstract type AbstractStaticBody <: AbstractPrescribedBody end
@@ -42,8 +41,6 @@ point_count(::NothingBody) = 0
 init_body_points!(::BodyPoints, ::NothingBody) = nothing
 update_body_points!(::BodyPoints, ::NothingBody, i, t) = nothing
 
-
-
 """
     StaticBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}}}
 
@@ -64,7 +61,7 @@ The StaticBody struct represents a real, immobile body.
 - `init_body_points!(points, body)` : Initializes `BodyPoints` with the static body's positions, zero velocities, and spacings.
 - `update_body_points!(points, body, i, t)` : No-op; static bodies do not move.
 """
-struct StaticBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}}, U} <:
+struct StaticBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},U} <:
        AbstractStaticBody
     x::A
     ds::S
@@ -90,27 +87,24 @@ end
     θ̇::T           # angular velocity
 end
 
-struct MovingBody{N, T,
-                  S<: AbstractVector{T},
-                  A<: AbstractVector{SVector{N,T}},
-                  F} <: AbstractMovingBody
+struct MovingBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},F} <:
+       AbstractMovingBody
     x_ref::A          # reference positions
     ds::S             # weights or spacings
     motion!::F        # function defining
+    function MovingBody(
+        x_ref::AbstractVector{SVector{N,T}}, ds::AbstractVector{T}, motion!::F
+    ) where {N,T,F}
+        MovingBody{N,T,typeof(ds),typeof(x_ref),F}(x_ref, ds, motion!)
+    end
 end
-
 
 point_count(b::MovingBody) = length(b.x_ref)
 
-MovingBody(x_ref::AbstractVector{SVector{N,T}},
-           ds::AbstractVector{T},
-           motion!::F) where {N,T,F} =
-    MovingBody{N,T,typeof(ds),typeof(x_ref),F}(x_ref, ds, motion!)
-
 # initialize body points at t=0 using the reference shape
 function init_body_points!(points::BodyPoints, body::MovingBody{N,T}) where {N,T}
-    points.x  .= body.x_ref
-    points.u  .= (zero(SVector{N,T}),)
+    points.x .= body.x_ref
+    points.u .= (zero(SVector{N,T}),)
     points.ds[:] = body.ds
     return nothing
 end
@@ -141,7 +135,8 @@ end
 
 update_body_points!(::BodyPoints, ::StaticBody, i, t) = nothing
 
-struct GroupedPrescribedBody{T<:Tuple{Vararg{AbstractPrescribedBody}}} <: AbstractPrescribedBody
+struct GroupedPrescribedBody{T<:Tuple{Vararg{AbstractPrescribedBody}}} <:
+       AbstractPrescribedBody
     bodies::T
 end
 

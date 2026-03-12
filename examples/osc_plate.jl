@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # %%
-using FastIBPM
+using Immersa
 using StaticArrays
 using ProgressMeter
 using OffsetArrays
@@ -21,37 +21,37 @@ using Plots
 # You can also change the output format by modifying the argument to
 # '''CairoMakie.activate!''' (e.g., to "png" or "pdf").
 
-
 #CairoMakie.activate!(; type="svg")
 
 # %%
 # Set up output directory
-const _FILEPATH = let f = @__FILE__; isempty(f) ? PROGRAM_FILE : f end
-const CASE     = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
-const SRCDIR   = isempty(_FILEPATH) ? pwd()      : dirname(_FILEPATH)
-const OUTDIR   = joinpath(SRCDIR, "figures", CASE)
+const _FILEPATH = let f = @__FILE__;
+    isempty(f) ? PROGRAM_FILE : f
+end
+const CASE = isempty(_FILEPATH) ? "session" : first(splitext(basename(_FILEPATH)))
+const SRCDIR = isempty(_FILEPATH) ? pwd() : dirname(_FILEPATH)
+const OUTDIR = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
 # --- helper: make a horizontal-surge rigid-motion callback (consistent with your ibpm xc/uc idea) ---
 function make_surge_motion(x_ref::Vector{SVector{2,Float64}}; A=1.0, f=0.20, ϕ=0.0)
     # returns: (x, u, i, t) -> nothing  that overwrites positions & velocities
-    return function (x::AbstractVector{SVector{2,Float64}},
-                     u::AbstractVector{SVector{2,Float64}},
-                     i::Int, t::Float64)
+    return function (
+        x::AbstractVector{SVector{2,Float64}},
+        u::AbstractVector{SVector{2,Float64}},
+        i::Int,
+        t::Float64,
+    )
         xshift = A * sin(2π*f*t + ϕ)
-        xdot   = 2π*f*A * cos(2π*f*t + ϕ)
+        xdot = 2π * f * A * cos(2π*f*t + ϕ)
         @inbounds for j in eachindex(x)
             # translate every reference point by (xshift, 0); rigid velocity is (xdot, 0)
             x[j] = x_ref[j] + SA[xshift, 0.0]
-            u[j] = SA[xdot,  0.0]
+            u[j] = SA[xdot, 0.0]
         end
         return nothing
     end
 end
-
-
-
-
 
 # %%
 h = 0.01  # grid cell size
@@ -64,14 +64,14 @@ grid = Grid(;
 # --- moving plate body (vertical plate oscillating horizontally) ---
 L_plate = 1.0
 α_plate = π/2              # vertical plate (90 deg)
-x0, y0  = 0.0, 0.5          # same idea as your ibpm example
+x0, y0 = 0.0, 0.5          # same idea as your ibpm example
 
 # choose IB point count so spacing ~ 2h (same spirit as your cylinder block)
 n_ib = max(2, 1 + round(Int, L_plate / (2h)))
-ds   = L_plate / (n_ib - 1)
+ds = L_plate / (n_ib - 1)
 
 dir = SA[cos(α_plate), sin(α_plate)]
-s   = range(-L_plate/2, L_plate/2; length=n_ib)
+s = range(-L_plate/2, L_plate/2; length=n_ib)
 
 # reference plate points (at rest)
 x_ref = [SA[x0, y0] + si*dir for si in s]
@@ -84,7 +84,6 @@ motion! = make_surge_motion(x_ref; A=A_surge, f=f_surge, ϕ=ϕ_surge)
 
 body = MovingBody(x_ref, fill(ds, n_ib), motion!)
 
-
 # %%
 dt = 0.001
 Re = 200.0
@@ -94,7 +93,7 @@ prob = IBProblem(grid, body, Re, u0);
 # %%
 function solution(file; tf, snapshot_freq)
     T = Float64
-    sol = CNAB(prob; dt, delta=FastIBPM.DeltaYang3S2())
+    sol = CNAB(prob; dt, delta=Immersa.DeltaYang3S2())
 
     # Perturbation to induce vortex shedding
     map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
@@ -105,7 +104,7 @@ function solution(file; tf, snapshot_freq)
     end
     apply_vorticity!(sol)
 
-    i_all = 1:1+round(Int, tf / dt)
+    i_all = 1:(1+round(Int, tf/dt))
     n_all = length(i_all)
 
     i_snapshot = i_all[1:snapshot_freq:end]
@@ -123,7 +122,7 @@ function solution(file; tf, snapshot_freq)
     )
     write_attribute(ω, "firstindex", collect(first.(axes(sol.ω[1][3]))))
 
-    @showprogress desc = "solving" for _ in 0:round(Int, tf / dt)
+    @showprogress desc = "solving" for _ in 0:round(Int, tf/dt)
         step!(sol)
 
         f = surface_force_sum(sol)
@@ -152,7 +151,6 @@ else
     end
 end
 
-
 # %%
 # Using Plots to visualize the vorticity field and save as an animation
 h5open(soln_path, "r") do file
@@ -160,8 +158,8 @@ h5open(soln_path, "r") do file
     ω = file["snapshots/omega"]
     ω_start = read_attribute(ω, "firstindex")
     nx, ny, nlev, nt = size(ω)
-    xidx = ω_start[1]:(ω_start[1] + nx - 1)
-    yidx = ω_start[2]:(ω_start[2] + ny - 1)
+    xidx = ω_start[1]:(ω_start[1]+nx-1)
+    yidx = ω_start[2]:(ω_start[2]+ny-1)
 
     ωlim = 7.5
 
@@ -176,22 +174,29 @@ h5open(soln_path, "r") do file
         xshift = A_surge * sin(2π * f_surge * t[i] + ϕ_surge)
 
         # start a fresh frame
-        p = plot(legend=false, aspect_ratio=:equal,
-                 xlim=(gridlims[1,1], gridlims[1,2]),
-                 ylim=(gridlims[2,1], gridlims[2,2]),
-                 framestyle=:box)
+        p = plot(
+            legend=false,
+            aspect_ratio=:equal,
+            xlim=(gridlims[1, 1], gridlims[1, 2]),
+            ylim=(gridlims[2, 1], gridlims[2, 2]),
+            framestyle=:box,
+        )
 
         # draw coarse→fine so the finest sits on top
         for lev in nlev:-1:1
             X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
-            xvec, yvec = X[:,1], Y[:,1]
+            xvec, yvec = X[:, 1], Y[:, 1]
             z = ω[:, :, lev, i]
 
-            heatmap!(xvec, yvec, z';
-                     aspect_ratio=:equal,
-                     colormap=:bwr,
-                     legend=false,
-                     clim=(-ωlim, ωlim))
+            heatmap!(
+                xvec,
+                yvec,
+                z';
+                aspect_ratio=:equal,
+                colormap=:bwr,
+                legend=false,
+                clim=(-ωlim, ωlim),
+            )
         end
 
         # draw the surging plate
@@ -203,8 +208,6 @@ h5open(soln_path, "r") do file
 
     gif(anim, joinpath(OUTDIR, "$(CASE)_vorticity.gif"); fps=30)
 end
-
-
 
 # %%
 # Using Makie to visualize the vorticity field and save as an animation
@@ -273,8 +276,7 @@ end
 
 # %%
 # Using Plots to visualize lift and drag coefficients with peaks and oscillation bands
-p = plot(legend = :topright, xlabel = "t", ylabel = "", ylims = (-2, 2),
-         framestyle = :box)
+p = plot(; legend=:topright, xlabel="t", ylabel="", ylims=(-2, 2), framestyle=:box)
 
 for f in (:Cl, :Cd)
     t = results.t

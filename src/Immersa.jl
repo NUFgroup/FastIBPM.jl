@@ -1,7 +1,7 @@
 """
-    FastIBPM
+    Immersa
 
-Main module of the **FastIBPM** package for high-performance immersed boundary simulations.
+Main module of the **Immersa** package for high-performance immersed boundary simulations.
 
 This module defines the core namespace of the package and integrates all components required for fluid–structure interaction problems. It loads external dependencies, includes internal source files, and exposes the primary API for setting up and solving immersed boundary formulations. The implementation emphasizes numerical efficiency through FFT-based solvers, multilevel grid operations, and GPU or parallel execution via `KernelAbstractions`.
 
@@ -9,9 +9,9 @@ This module defines the core namespace of the package and integrates all compone
 None.
 
 # Returns
-The `FastIBPM` module namespace, providing access to the main data structures, solvers, and utility functions for immersed boundary simulations.
+The `Immersa` module namespace, providing access to the main data structures, solvers, and utility functions for immersed boundary simulations.
 """
-module FastIBPM
+module Immersa
 
 # ------------------------------------------------------------------------
 # Dependencies
@@ -22,7 +22,6 @@ module FastIBPM
 # FFTW is used for spectral solvers and transforms.
 # FunctionWrappers and Adapt support dynamic and GPU-compatible function calls.
 # EllipsisNotation simplifies array slicing and broadcasting syntax.
-
 
 using LinearAlgebra
 using StaticArrays
@@ -36,7 +35,6 @@ using IterativeSolvers
 using FunctionWrappers: FunctionWrapper
 import Adapt
 import FFTW
-
 
 # ------------------------------------------------------------------------
 # Public API Exports
@@ -63,18 +61,24 @@ export set_time!,
 export CNAB
 export log_timestep
 
-
 # ------------------------------------------------------------------------
 # Internal Source Files
 # ------------------------------------------------------------------------
-# Each file defines a subsystem of the FastIBPM package. They are included
+# Each file defines a subsystem of the Immersa package. They are included
 # here to assemble the full immersed boundary solver framework.
 
 # FFT-based real-to-real transforms and Poisson solvers
 include("FFT_R2R.jl")
 
+include("OffsetTuples.jl")
+using .OffsetTuples
+
 # General-purpose numerical and array utilities
-include("utils.jl")
+include("Utilities.jl")
+using .Utilities
+
+include("ArrayPools.jl")
+using .ArrayPools
 
 # Problem setup and initialization routines
 include("problems.jl")
@@ -90,7 +94,6 @@ include("operators.jl")
 
 #CNAB time integration scheme implementation
 include("cnab.jl")
-
 
 """
     load!(filename::AbstractString, x)

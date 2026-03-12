@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # %%
-using FastIBPM
+using Immersa
 using StaticArrays
 using ProgressMeter
 using CairoMakie
@@ -54,7 +54,7 @@ prob = IBProblem(grid, body, Re, u0);
 
 # %%
 function solution(file; tf, snapshot_freq)
-    sol = CNAB(prob; dt, coupler_args=(; bicgstabl_args=(;)), delta=FastIBPM.DeltaYang3S2())
+    sol = CNAB(prob; dt, coupler_args=(; bicgstabl_args=(;)), delta=Immersa.DeltaYang3S2())
 
     θ = deg2rad(1)
     let x = range(0, L, n_ib)
@@ -63,7 +63,7 @@ function solution(file; tf, snapshot_freq)
         @. χ[3:3:end] = θ
     end
 
-    i_all = 1:1+round(Int, tf / dt)
+    i_all = 1:(1+round(Int, tf/dt))
     n_all = length(i_all)
 
     i_snapshot = i_all[1:snapshot_freq:end]
@@ -169,7 +169,7 @@ h5open(soln_path, "r") do soln
     t = read(soln["snapshots/t"])
     ω = soln["snapshots/omega"]
     ω_start = read_attribute(ω, "firstindex")
-    ω_axes = map((i0, s) -> @.(i0 + (0:s-1)), Tuple(ω_start), size(ω))
+    ω_axes = map((i0, s) -> @.(i0 + (0:(s-1))), Tuple(ω_start), size(ω))
     x_ib = read(soln["snapshots/x_ib"])
 
     fig = Figure(; size=(1000, 300))
