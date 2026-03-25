@@ -16,12 +16,30 @@ Hierarchy sketch:
 
 """
 
+"""
+    AbstractPrescribedBody <: AbstractBody
+
+Abstract supertype for all bodies whose motion is fully prescribed (not coupled).
+
+Subtypes include `AbstractStaticBody` (zero motion) and `AbstractMovingBody`
+(time-dependent prescribed motion).
+"""
 abstract type AbstractPrescribedBody <: AbstractBody end
 
+"""
+    AbstractStaticBody <: AbstractPrescribedBody
+
+Abstract supertype for bodies with zero motion. Concrete subtypes: `NothingBody`,
+`StaticBody`.
+"""
 abstract type AbstractStaticBody <: AbstractPrescribedBody end
 
-# Arturo: add abstract type for moving prescribed bodies
+"""
+    AbstractMovingBody <: AbstractPrescribedBody
 
+Abstract supertype for bodies with prescribed time-dependent motion. Concrete
+subtype: `MovingBody`.
+"""
 abstract type AbstractMovingBody <: AbstractPrescribedBody end
 
 """
@@ -42,23 +60,32 @@ init_body_points!(::BodyPoints, ::NothingBody) = nothing
 update_body_points!(::BodyPoints, ::NothingBody, i, t) = nothing
 
 """
-    StaticBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}}}
+    StaticBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},U}
 
-The StaticBody struct represents a real, immobile body.
+A real, immobile body defined by fixed positions and spacings, with an optional
+velocity callback for actuated surfaces.
 
 # Fields
 - `x::A` : Vector of positions (`SVector{N,T}`) in N-dimensional space.
 - `ds::S` : Vector of weights or spacings associated with points.
+- `u::U`  : Velocity callback `(u, i, t) -> nothing`, called at each step. Defaults to a no-op.
 
 # Type parameters
 - `N` : Spatial dimension.
 - `T` : Scalar type (e.g., `Float64`).
 - `S` : Type of vector for `ds`.
 - `A` : Type of vector for `x`.
+- `U` : Type of the velocity callback.
+
+# Constructor
+    StaticBody(x, ds)
+    StaticBody(x, ds, u)
+
+When `u` is omitted, a no-op callback is used.
 
 # Related functions
 - `point_count(body)` : Returns the number of points on the body.
-- `init_body_points!(points, body)` : Initializes `BodyPoints` with the static body's positions, zero velocities, and spacings.
+- `init_body_points!(points, body)` : Initialises `BodyPoints` with the static body's positions, zero velocities, and spacings.
 - `update_body_points!(points, body, i, t)` : No-op; static bodies do not move.
 """
 struct StaticBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},U} <:
@@ -70,16 +97,37 @@ end
 
 StaticBody(x, ds) = StaticBody(x, ds, (u, i, t) -> nothing)
 
+"""
+    point_count(body::StaticBody) -> Int
+
+Return the number of immersed-boundary points on a `StaticBody`.
+"""
 point_count(body::StaticBody) = length(body.x)
 
+"""
+    init_body_points!(points::BodyPoints, body::StaticBody{N,T})
+
+Copy the static body's positions and spacings into `points` and set all velocities
+to zero.
+"""
 function init_body_points!(points::BodyPoints, body::StaticBody{N,T}) where {N,T}
     points.x .= body.x
     points.u .= (zero(SVector{N,T}),)
     points.ds[:] = body.ds
 end
 
-# Arturo: add abstract type for moving prescribed bodies
+"""
+    PoseTwist2D{T}
 
+Describes a 2-D rigid-body pose (position + orientation) and its time derivative
+(translational and angular velocity).
+
+# Fields
+- `c::SVector{2,T}` : Centre-of-mass translation.
+- `θ::T`            : Rotation angle.
+- `ċ::SVector{2,T}` : Translational velocity.
+- `θ̇::T`           : Angular velocity.
+"""
 @kwdef struct PoseTwist2D{T}
     c::SVector{2,T} # translation
     θ::T            # rotation angle
@@ -87,6 +135,25 @@ end
     θ̇::T           # angular velocity
 end
 
+"""
+    MovingBody{N,T,S,A,F} <: AbstractMovingBody
+
+A body with prescribed time-dependent motion defined by a user-supplied callback.
+
+# Fields
+- `x_ref::A`  : Reference (initial) positions (`Vector{SVector{N,T}}`).
+- `ds::S`     : Weights or spacings associated with points.
+- `motion!::F`: Callback `(x, u, i, t) -> nothing` that overwrites positions `x` and
+  velocities `u` at step `i` and time `t`.
+
+# Constructor
+    MovingBody(x_ref, ds, motion!)
+
+# Related functions
+- `point_count(body)` : Returns the number of points.
+- `init_body_points!(points, body)` : Initialises `BodyPoints` from the reference shape with zero velocity.
+- `update_body_points!(points, body, i, t)` : Calls `motion!` to update positions and velocities.
+"""
 struct MovingBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},F} <:
        AbstractMovingBody
     x_ref::A          # reference positions
@@ -99,9 +166,19 @@ struct MovingBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},F} <:
     end
 end
 
+"""
+    point_count(body::MovingBody) -> Int
+
+Return the number of immersed-boundary points on a `MovingBody`.
+"""
 point_count(b::MovingBody) = length(b.x_ref)
 
-# initialize body points at t=0 using the reference shape
+"""
+    init_body_points!(points::BodyPoints, body::MovingBody{N,T})
+
+Copy the reference positions and spacings into `points` and set all velocities
+to zero.
+"""
 function init_body_points!(points::BodyPoints, body::MovingBody{N,T}) where {N,T}
     points.x .= body.x_ref
     points.u .= (zero(SVector{N,T}),)
@@ -109,43 +186,65 @@ function init_body_points!(points::BodyPoints, body::MovingBody{N,T}) where {N,T
     return nothing
 end
 
+"""
+    update_body_points!(points::BodyPoints, body::MovingBody, i, t)
+
+Invoke the body's `motion!` callback to overwrite positions and velocities at
+step `i` and time `t`.
+"""
 function update_body_points!(pts::BodyPoints{N,T}, b::MovingBody{N,T}, i, t) where {N,T}
-    # let the user callback *overwrite* current x,u for the time (i,t)
     b.motion!(pts.x, pts.u, i, t)
     nothing
 end
 
-# function update_body_points!(points::BodyPoints, body::StaticBody, i, t) #commented out since Nick added the below version
-#     body.u(points.u, i, t)
-# end
+"""
+    update_body_points!(::BodyPoints, ::StaticBody, i, t)
 
-# plate.jl
-# tangent = SA[tx, ty]
-# w(s) = 0.1 < s < 0.3 ? 1 : 0
-# StaticBody(
-#     x,
-#     ds,
-#     function (u, i, t)
-#         s = range(0, 1, length(u))
-#         for j in eachindex(u)
-#             u[j] = ua * sin(2π * f * t + ϕ) * tangent * w(s)
-#         end
-#     end
-# )
-
+No-op for static bodies — positions and velocities are unchanged.
+"""
 update_body_points!(::BodyPoints, ::StaticBody, i, t) = nothing
 
+"""
+    GroupedPrescribedBody{T<:Tuple{Vararg{AbstractPrescribedBody}}}
+
+A composite body that groups multiple `AbstractPrescribedBody` instances into a
+single body interface. Operations iterate over all contained bodies.
+
+# Fields
+- `bodies::T` : Tuple of prescribed bodies.
+
+# Related functions
+- `point_count(body)` : Returns the sum of point counts across all sub-bodies.
+- `init_body_points!(points, body)` : Initialises points for each sub-body.
+- `update_body_points!(points, body, i, t)` : Updates points for each sub-body.
+"""
 struct GroupedPrescribedBody{T<:Tuple{Vararg{AbstractPrescribedBody}}} <:
        AbstractPrescribedBody
     bodies::T
 end
 
+"""
+    point_count(body::GroupedPrescribedBody) -> Int
+
+Return the total number of immersed-boundary points across all sub-bodies.
+"""
 point_count(body::GroupedPrescribedBody) = sum(point_count, body.bodies)
 
+"""
+    init_body_points!(points::BodyPoints, body::GroupedPrescribedBody)
+
+Initialise body points for each sub-body in the group.
+"""
 function init_body_points!(points::BodyPoints, body::GroupedPrescribedBody)
     foreach(b -> init_body_points!(points, b), body.bodies)
 end
 
+"""
+    update_body_points!(points::BodyPoints, body::GroupedPrescribedBody, i, t)
+
+Update body points for each sub-body in the group at step `i` and time `t`.
+"""
 function update_body_points!(points::BodyPoints, body::GroupedPrescribedBody, i, t)
     foreach(b -> update_body_points!(points, b, i, t), body.bodies)
 end
+

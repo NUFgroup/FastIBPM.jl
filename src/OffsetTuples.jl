@@ -146,21 +146,6 @@ underlying tuple, just like a standard tuple.
 - `(value, next_state)` or `nothing`.
 """
 Base.iterate(a::OffsetTuple) = iterate(a.x)
-
-"""
-    Base.iterate(a::OffsetTuple)
-    Base.iterate(a::OffsetTuple, state)
-
-Defines iteration for `OffsetTuple`. It iterates over the *values* of the
-underlying tuple, just like a standard tuple.
-
-# Arguments
-- `a::OffsetTuple`: The offset tuple to iterate over.
-- `state`: The iteration state (optional).
-
-# Returns
-- `(value, next_state)` or `nothing`.
-"""
 Base.iterate(a::OffsetTuple, state) = iterate(a.x, state)
 
 """
@@ -182,3 +167,4 @@ function Adapt.adapt_structure(to, a::OffsetTuple{O}) where {O}
 end
 
 end # module
+

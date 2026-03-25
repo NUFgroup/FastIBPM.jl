@@ -675,8 +675,26 @@ function (x::CNAB_Binv_Precomputed)(f, u_ib, ::CNAB{N,T}) where {N,T}
     end
 end
 
-# Arturo: Add struct and function for moving bodies
+"""
+    CNAB_Binv_Iterative{T}
 
+An iterative coupling operator for the CNAB solver, used when the body–fluid
+coupling matrix `B` changes every step (e.g. for moving prescribed bodies).
+
+Instead of precomputing `B⁻¹`, solves the linear system `B f = rhs` with
+BiCGStab(ℓ) at each coupling step. The current contents of `f` serve as
+a warm start.
+
+# Fields
+- `abstol::T` : Absolute solver tolerance (default `1e-5`).
+- `reltol::T` : Relative solver tolerance (default `0.0`).
+
+# Call signature
+    (op::CNAB_Binv_Iterative)(f, rhs, sol::CNAB)
+
+Solves `B f = rhs` in place, where `B` is assembled from the current geometry
+via `B_rigid_mul!`.
+"""
 Base.@kwdef struct CNAB_Binv_Iterative{T}
     abstol::T = T(1e-5)
     reltol::T = T(0.0)
@@ -1301,15 +1319,26 @@ const CNAB_signature = Vector{UInt8}("Immersa.jl:CNAB")
 """
     save(io::IO, sol::CNAB)
 
-Serialize the current state of a `CNAB` simulation and write it to the given I/O stream
-(e.g., a file). This allows the simulation to be saved and later restored.
+Serialize the current state of a `CNAB` simulation to a binary I/O stream.
+
+The binary layout (all integers little-endian) is:
+
+1. `CNAB_signature` (magic bytes).
+2. `UInt32` scalar size (`sizeof(T)`).
+3. `UInt32` spatial dimension `N`.
+4. `SVector{N,UInt32}` grid cell counts.
+5. `UInt32` number of multigrid levels.
+6. `Int32` current time step index.
+7. Vorticity fields (interior values only, little-endian `T`), one block per
+   component per level.
+8. `UInt32` nonlinear history count.
+9. Nonlinear history buffers (same layout as vorticity).
+
+Use [`load!`](@ref) to restore the state into an existing `CNAB` object.
 
 # Arguments
-- `io`: An I/O stream to write the binary data to (e.g., a file handle).
-- `sol`: The `CNAB` solver object containing the current simulation state.
-
-# Output
-- Nothing; writes directly to the provided I/O stream.
+- `io::IO`      : Output stream (e.g. an open file).
+- `sol::CNAB`   : Solver state to serialise.
 """
 function save(io::IO, sol::CNAB{N,T}) where {N,T}
     grid = sol.prob.grid
@@ -1355,15 +1384,17 @@ end
 """
     load!(io::IO, sol::CNAB)
 
-Restore a previously saved `CNAB` simulation state from an I/O stream (e.g., a binary file)
-into an existing solver object. This reconstructs the simulation exactly as it was when saved.
+Restore a previously saved `CNAB` simulation state from a binary I/O stream into
+an existing solver object.
+
+Reads the binary format produced by [`save`](@ref), verifies the magic signature
+and grid parameters, then overwrites the vorticity, time step, and nonlinear
+history in `sol`. The solver is left in a consistent state ready for further
+time-stepping.
 
 # Arguments
-- `io`: An I/O stream to read the binary data from (e.g., a file handle).
-- `sol`: The `CNAB` solver object to populate with the loaded state.
-
-# Output
-- Nothing; the `sol` object is updated in-place with the loaded simulation state.
+- `io::IO`    : Input stream positioned at the start of a saved CNAB block.
+- `sol::CNAB` : Solver object to populate (modified in place).
 """
 function load!(io::IO, sol::CNAB{N,T}) where {N,T}
     grid = sol.prob.grid
@@ -1407,3 +1438,4 @@ function load!(io::IO, sol::CNAB{N,T}) where {N,T}
 
     nothing
 end
+

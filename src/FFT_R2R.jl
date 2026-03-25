@@ -54,13 +54,33 @@ A plan object that can be used with `mul!(y, plan, x)` to apply the transform ef
 """
 plan_r2r!(A, args...; kw...) = _plan_r2r!(get_backend(A), A, args...; kw...)
 
+"""
+    _plan_r2r!(::CPU, args...; kw...)
+
+CPU backend: delegates to `FFTW.plan_r2r!` with multithreading enabled.
+"""
 function _plan_r2r!(::CPU, args...; kw...)
     FFTW.plan_r2r!(args...; num_threads=Threads.nthreads(), kw...)
 end
 
+"""
+    _plan_r2r!(dev, A, kind, args...; kw...)
+
+Non-CPU fallback: builds an emulated R2R plan via `bad_plan_r2r!` using
+per-dimension `Val`-wrapped transform kinds.
+"""
 _plan_r2r!(dev, A, kind, args...; kw...) = bad_plan_r2r!(A, Val.(kind), args...; kw...)
 
-struct R2R{P<:Tuple} # Defines a container for a tuple of FFT plans
+"""
+    R2R{P<:Tuple}
+
+Container holding a tuple of 1-D R2R FFT plans, one per spatial dimension.
+Used as the return type of `bad_plan_r2r!` for multi-dimensional transforms.
+
+# Fields
+- `p::P` : Tuple of per-dimension FFT plans.
+"""
+struct R2R{P<:Tuple}
     p::P
 end
 
@@ -277,3 +297,4 @@ function LinearAlgebra.mul!(y, (; dims, p, a, b)::REDFT01, x)
 end
 
 end
+

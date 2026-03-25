@@ -234,3 +234,4 @@ _array_shape(a::AbstractArray) = axes(a)
 _array_shape(a) = map(_array_shape, a)
 
 end # module
+
