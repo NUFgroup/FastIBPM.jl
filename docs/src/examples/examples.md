@@ -16,7 +16,7 @@ A small perturbation is added to the initial vorticity field to trigger natural 
 Load the required packages and set up the output directory:
 
 ```julia
-using FastIBPM
+using Immersa
 using StaticArrays
 using ProgressMeter
 using OffsetArrays

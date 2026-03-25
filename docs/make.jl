@@ -1,28 +1,30 @@
 using Documenter
-using FastIBPM
+using Immersa
 
 makedocs(
-    sitename = "FastIBPM",
+    sitename = "Immersa",
     format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
-    modules = [FastIBPM],
+    modules = [Immersa],
     checkdocs = :none,
     pages = [
         "Home"          => "index.md",
-        "Examples"      => "examples.md",
+        "Examples"      => "examples/examples.md",
         "API Reference" => [
-            "Problem Definition" => "problem_definition.md",
-            "CNAB"    => "cnab.md",
-            "Prescribed Bodies"  => "prescribed_bodies.md",
-            "Operators"          => "operators.md",
-            "FFT Transforms"     => "fft_r2r.md",
-            "Utilities"          => "utils.md",
+            "ArrayPools"         => "API/array_pools.md",
+            "Problem Definition" => "API/problems.md",
+            "CNAB"               => "API/cnab.md",
+            "Prescribed Bodies"  => "API/prescribed_bodies.md",
+            "Structural Bodies"  => "API/structural_bodies.md",
+            "Operators"          => "API/operators.md",
+            "FFT Transforms"     => "API/fft_r2r.md",
+            "Utilities"          => "API/utilities.md",
             
         ],
     ],
 )
 
 deploydocs(
-    repo      = "github.com/NUFgroup/FastIBPM.jl",
+    repo      = "github.com/NUFgroup/Immersa.jl",
     devbranch = "main",
 )
 
