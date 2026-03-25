@@ -12,7 +12,7 @@ support custom FFT-based operations for real-valued arrays.
 - CPU/GPU dispatch via `KernelAbstractions`
 - Integration with Julia’s `LinearAlgebra` API
 """
-module FFT_R2R
+module fft_r2r
 
 # ------------------------------------------------------------------------
 # Dependencies

@@ -1,4 +1,4 @@
-module OffsetTuples
+module offset_tuples
 
 import Adapt
 

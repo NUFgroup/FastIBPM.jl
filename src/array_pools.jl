@@ -1,4 +1,4 @@
-module ArrayPools
+module array_pools
 
 using KernelAbstractions
 

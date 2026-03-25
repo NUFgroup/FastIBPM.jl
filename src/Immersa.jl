@@ -68,26 +68,26 @@ export log_timestep
 # here to assemble the full immersed boundary solver framework.
 
 # FFT-based real-to-real transforms and Poisson solvers
-include("FFT_R2R.jl")
+include("fft_r2r.jl")
 
-include("OffsetTuples.jl")
-using .OffsetTuples
+include("offset_tuples.jl")
+using .offset_tuples
 
 # General-purpose numerical and array utilities
-include("Utilities.jl")
-using .Utilities
+include("utilities.jl")
+using .utilities
 
-include("ArrayPools.jl")
-using .ArrayPools
+include("array_pools.jl")
+using .array_pools
 
 # Problem setup and initialization routines
 include("problems.jl")
 
 # Models for prescribed (kinematically constrained) bodies
-include("prescribed-bodies.jl")
+include("prescribed_bodies.jl")
 
 # Models for deformable bodies
-include("structural-bodies.jl")
+include("structural_bodies.jl")
 
 # Discrete differential operators and grid mappings
 include("operators.jl")

@@ -1,6 +1,6 @@
-module Utilities
+module utilities
 
-using Immersa.OffsetTuples
+using Immersa.offset_tuples
 using Printf
 using KernelAbstractions
 using EllipsisNotation
