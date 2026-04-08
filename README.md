@@ -58,7 +58,44 @@ include(joinpath(pkgdir(Immersa), "examples", "cylinder.jl"))
 This will run the simulation and save results (vorticity, lift, and drag) in HDF5 and CGNS format files. You can then visualize the outputs using the plotting scripts provided, or importing the CGNS files into [ParaView](https://www.paraview.org/).
 
 ## How to Contribute
+Contributions are welcome and appreciated! If you would like to improve Immersa.jl, please follow these steps:
 
+### 1. Fork and clone the repository
+
+```bash
+git clone https://github.com/NUFgroup/Immersa.jl.git
+cd Immersa.jl
+```
+
+### 2. Set up the development environment
+```bash
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+```
+### 3. Create a feature branch
+```bash
+git checkout -b feature/<short-description>
+```
+### 4. Make your changes
+- Follow the existing code style
+- Add or update documentation if needed
+- Include tests when applicable
+
+### 5. Run tests
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+### 6. Commit and push
+```bash
+git add -A
+git commit -m "Describe your changes"
+git push -u origin feature/<short-description>
+```
+### 7. Open a pull request
+Submit a pull request on GitHub targeting the main branch. Please include a clear description of your changes and their purpose.
+
+### Notes
+Use ```--project=.``` to ensure a consistent environment.
+For major changes, consider opening an issue first to discuss your approach.
 
 ## References
 - Colonius, T., & Taira, K. (2008). A fast immersed boundary method using a nullspace approach and multi-domain far-field boundary conditions.
