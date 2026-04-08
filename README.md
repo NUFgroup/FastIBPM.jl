@@ -1,6 +1,6 @@
 # Immersa
 
-Immersa.jl is a Julia package that implements immersed boundary methods for the numerical solution of strongly coupled fluid–structure interaction (FSI) problems governed by the incompressible Navier–Stokes equations.
+*Immersa.jl* is a Julia package that implements immersed boundary methods for the numerical solution of strongly coupled fluid–structure interaction (FSI) problems governed by the incompressible Navier–Stokes equations.
 
 The package includes implementations of:
 - The immersed boundary method of [Colonius & Taira (2008)](https://doi.org/10.1016/j.cma.2007.08.014)
@@ -13,11 +13,7 @@ Prescribed structural deformations are supported in both 2D and 3D flows. Strong
 The code uses [KernelAbstractions.jl](https://juliagpu.github.io/KernelAbstractions.jl/stable/) for parallel execution on both CPUs and GPUs. It also supports automatic differentiation via [ForwardDiff.jl](https://juliadiff.org/ForwardDiff.jl/stable/) to compute sensitivities of solver outputs.
 
 ## Installation
-Prerequisites:
-- Julia ≥ 1.9  
-- Git (only required for development)
-
-Start Julia and add the package:
+Install the latest version of Julia, then start it and and add the *Immersa* package:
 
 ```julia
 using Pkg
@@ -32,7 +28,7 @@ julia --project=@. -e 'using Pkg; Pkg.add(url="https://github.com/NUFgroup/Immer
 julia --project=@. examples/<example_name>.jl
 ```
 
-To run examples from the REPL after adding the package:
+To run examples from the REPL after adding the Immersa package:
 
 ```julia
 using Immersa
@@ -40,9 +36,9 @@ include(joinpath(pkgdir(Immersa), "examples", "<example_name>.jl"))
 ```
 
 ## Running Examples
-- **Cylinder:**
-- **Flag:**
-- **Heaving cylinder:**
+- **Cylinder:** non-deforming cylinder in a steady-state freestream flow.
+- **Flag:** flag immersed in a steady-state freestream flow (FSI).
+- **Heaving cylinder:** 
 - **Naca0012:**
 - **Oscillating plate:**
 - **Plate:**
@@ -61,7 +57,7 @@ include(joinpath(pkgdir(Immersa), "examples", "cylinder.jl"))
 ```
 This will run the simulation and save results (vorticity, lift, and drag) in HDF5 and CGNS format files. You can then visualize the outputs using the plotting scripts provided, or importing the CGNS files into [ParaView](https://www.paraview.org/).
 
-## Developer Setup
+## How to Contribute
 
 
 ## References
