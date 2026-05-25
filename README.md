@@ -38,11 +38,11 @@ include(joinpath(pkgdir(Immersa), "examples", "<example_name>.jl"))
 ## Running Examples
 - **Cylinder:** non-deforming cylinder in a steady-state freestream flow.
 - **Flag:** flag immersed in a steady-state freestream flow (FSI).
-- **Heaving cylinder:** 
-- **Naca0012:**
-- **Oscillating plate:**
-- **Plate:**
-- **Plate actuation:**
+- **Moving cylinder:** oscillating rigid cylinder in a quiescent flow.
+- **Naca0012:** rigid airfoil in steady-state freestream flow.
+- **Oscillating plate:** oscillating rigid plate in a quiescent flow.
+- **Plate:** rigid plate in steady-state freestream flow.
+- **Plate actuation:** rigid plate in steady-state freestream flow with moving wall boundary condition.
 
 ## Quick Start
 Run the cylinder simulation example included in the repository:
