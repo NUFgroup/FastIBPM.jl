@@ -1,4 +1,4 @@
-# FastIBPM.jl Example
+# Immersa.jl Example
 
 One example on how to run the code. The `src` folder contains all the necessary files to run it. More examples are provided in the examples folder.
 
