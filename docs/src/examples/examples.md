@@ -3,7 +3,7 @@
 One example on how to run the code. The `src` folder contains all the necessary files to run it. More examples are provided in the examples folder.
 
 
-# Flow Past a Cylinder (Re = 200) — FastIBPM Example
+# Flow Past a Cylinder (Re = 200)
 
 This example simulates flow around a circular cylinder at Reynolds number Re = 200. 
 
