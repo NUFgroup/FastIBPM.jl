@@ -162,7 +162,7 @@ struct MovingBody{N,T,S<:AbstractVector{T},A<:AbstractVector{SVector{N,T}},F} <:
     function MovingBody(
         x_ref::AbstractVector{SVector{N,T}}, ds::AbstractVector{T}, motion!::F
     ) where {N,T,F}
-        MovingBody{N,T,typeof(ds),typeof(x_ref),F}(x_ref, ds, motion!)
+        new{N,T,typeof(ds),typeof(x_ref),F}(x_ref, ds, motion!)
     end
 end
 

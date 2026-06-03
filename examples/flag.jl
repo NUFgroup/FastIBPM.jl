@@ -3,7 +3,9 @@
 using Immersa
 using StaticArrays
 using ProgressMeter
-using CairoMakie
+#using CairoMakie
+using Plots
+using DelimitedFiles
 using OffsetArrays
 using LinearAlgebra
 using HDF5
@@ -116,7 +118,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do soln
-        solution(soln; tf=15.0, snapshot_freq=100)
+        solution(soln; tf=10.0, snapshot_freq=100)
     end
 end
 
@@ -151,6 +153,28 @@ let
     axislegend(ax; position=:lt)
 
     fig
+end
+
+
+# Comparison with Goza et al. data (2017)
+let
+    goza = readdlm("examples/figures/flag/Goza2017_data.csv", ',')
+    t_goza = goza[:, 1]
+    y_goza = goza[:, 2]
+
+    r = 1:10:length(results.t)
+    p = @views plot(results.t[r], results.x_tip[2, r];
+                    xlabel="t", label="tip displacement", legend=:topleft)
+    #@views plot!(p, results.t[r], results.CL[r]; linewidth=1, label="CL")
+
+    for inds in y_extrema
+        @views scatter!(p, results.t[inds], results.x_tip[2, inds]; label="", color=1)
+    end
+
+    scatter!(p, t_goza, y_goza;
+             label="Goza 2017", color=:black, markersize=3, markerstrokewidth=0)
+
+    p
 end
 
 # %%
@@ -208,4 +232,59 @@ h5open(soln_path, "r") do soln
         ωi[] = ω[:, :, :, i]
         x[] = @view x_ib[:, :, i]
     end
+end
+
+
+# For saving the gif
+using Plots
+h5open(soln_path, "r") do soln
+    t = read(soln["snapshots/t"])
+    ω = soln["snapshots/omega"]
+    ω_start = read_attribute(ω, "firstindex")
+    nx, ny, nlev, nt = size(ω)
+    xidx = ω_start[1]:(ω_start[1] + nx - 1)
+    yidx = ω_start[2]:(ω_start[2] + ny - 1)
+    x_ib = read(soln["snapshots/x_ib"])
+
+    ωlim = 15.0
+
+    anim = Animation()
+    @showprogress for i in eachindex(t)
+        p = plot(legend=false, colorbar=true, colorbar_title="ω",
+                 aspect_ratio=:equal,
+                 framestyle=:box,
+                 foreground_color_axis=:black,
+                 top_margin=1Plots.mm,
+                 xlim=(gridlims[1, 1], gridlims[1, 2]),
+                 ylim=(gridlims[2, 1], gridlims[2, 2]),
+                 )
+
+        for lev in nlev:-1:1
+            X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
+            xvec, yvec = X[:, 1], Y[:, 1]
+            z = ω[:, :, lev, i]
+
+            zplot = copy(z)
+            finite_mask = isfinite.(zplot)
+            zplot[finite_mask] .= clamp.(zplot[finite_mask], -ωlim, ωlim)
+
+            contourf!(xvec, yvec, zplot';
+                aspect_ratio=:equal,
+                colormap=:bwr,
+                levels=30,
+                lw=0,
+                legend=false,
+                clim=(-ωlim, ωlim),
+                framestyle=:box,
+                foreground_color_axis=:black,
+            )
+        end
+
+        plot!(p, x_ib[1, :, i], x_ib[2, :, i]; color=:black, lw=2, label="", framestyle=:box)
+
+        title!(p, @sprintf("t = %.3f", t[i]))
+        frame(anim, p)
+    end
+
+    gif(anim, replace(soln_path, ".h5" => "_vorticity.gif"); fps=20)
 end

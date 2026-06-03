@@ -138,20 +138,20 @@ end
 # ---------------------------------------------------------
 # Grid / problem setup
 # ---------------------------------------------------------
-h = 0.0055
+h = 0.004 #0.0055
 gridlims = SA[-1.0 1.0; -1.0 1.0]
 grid = Grid(;
     h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=5
 )
 
 dt = 0.001
-Re = 1000.0
+Re = 500.0 #1000.0
 u0 = UniformFlow(t -> SA[1.0, 0.0])
 
 # ---------------------------------------------------------
 # Build NACA airfoil body with constant ds ≈ 2h (like cylinder)
 # ---------------------------------------------------------
-naca_code = "0015"
+naca_code = "0012"
 alpha_deg = -15.0
 alpha = alpha_deg * pi/180
 

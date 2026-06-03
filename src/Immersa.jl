@@ -69,6 +69,7 @@ export log_timestep
 
 # FFT-based real-to-real transforms and Poisson solvers
 include("fft_r2r.jl")
+using .fft_r2r
 
 include("offset_tuples.jl")
 using .offset_tuples

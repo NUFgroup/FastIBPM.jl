@@ -222,8 +222,8 @@ function LaplacianPlan(ωᵢ, i, n::SVector{N}) where {N}
 
     kind = laplacian_fft_kind(i, N)
     flags = FFTW.EXHAUSTIVE
-    fwd = FFT_R2R.plan_r2r!(ωᵢ, kind; flags)
-    inv = FFT_R2R.plan_r2r!(ωᵢ, map(k -> FFTW.inv_kind[k], kind); flags)
+    fwd = fft_r2r.plan_r2r!(ωᵢ, kind; flags)
+    inv = fft_r2r.plan_r2r!(ωᵢ, map(k -> FFTW.inv_kind[k], kind); flags)
     n_logical = prod(map(FFTW.logical_size, nω, kind))
 
     LaplacianPlan(λ, similar(ωᵢ), fwd, inv, n_logical)

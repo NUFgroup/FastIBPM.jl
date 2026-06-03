@@ -79,6 +79,12 @@ function solution(file; tf, snapshot_freq)
     i_snapshot = i_all[1:snapshot_freq:end]
     n_snapshot = length(i_snapshot)
 
+    body_group = create_group(file, "body")
+    body_pts = create_dataset(body_group, "points", T, (2, length(body.x)))
+    body_pts[:, :] = reduce(hcat, body.x)
+    body_len = create_dataset(body_group, "lengths", T, (length(body.ds),))
+    body_len[:] = body.ds
+
     all_group = create_group(file, "all")
     t_all = create_dataset(all_group, "t", T, (n_all,))
     Cl = create_dataset(all_group, "Cl", T, (n_all,))
@@ -90,6 +96,26 @@ function solution(file; tf, snapshot_freq)
         snapshot_group, "omega", T, (size(sol.ω[1][3])..., grid.levels, n_snapshot)
     )
     write_attribute(ω, "firstindex", collect(first.(axes(sol.ω[1][3]))))
+
+    # physical coordinate vectors for each level (used by fluid_time_series.jl)
+    Nx_ω, Ny_ω = size(sol.ω[1][3])
+    i0, j0 = first.(axes(sol.ω[1][3]))
+    xidx = i0:(i0 + Nx_ω - 1)
+    yidx = j0:(j0 + Ny_ω - 1)
+    x_ds = create_dataset(snapshot_group, "x_coords", T, (Nx_ω, grid.levels))
+    y_ds = create_dataset(snapshot_group, "y_coords", T, (Ny_ω, grid.levels))
+    for lev in 1:grid.levels
+        X, Y = coord(grid, Loc_ω(3), (xidx, yidx), lev)
+        x_ds[:, lev] = X[:, 1]
+        y_ds[:, lev] = Y[:, 1]
+    end
+
+    ux = create_dataset(
+        snapshot_group, "ux", T, (size(sol.u[1][1])..., grid.levels, n_snapshot)
+    )
+    uy = create_dataset(
+        snapshot_group, "uy", T, (size(sol.u[1][2])..., grid.levels, n_snapshot)
+    )
 
     @showprogress desc = "solving" for _ in 0:round(Int, tf/dt)
         step!(sol)
@@ -103,7 +129,9 @@ function solution(file; tf, snapshot_freq)
             i = 1 + (sol.i - first(i_snapshot)) ÷ step(i_snapshot)
             t_snapshot[i] = sol.t
             for level in eachindex(sol.ω)
-                ω[:, :, level, i] = OffsetArrays.no_offset_view(sol.ω[level][3])
+                ω[:, :, level, i]  = OffsetArrays.no_offset_view(sol.ω[level][3])
+                ux[:, :, level, i] = OffsetArrays.no_offset_view(sol.u[level][1])
+                uy[:, :, level, i] = OffsetArrays.no_offset_view(sol.u[level][2])
             end
         end
     end
@@ -116,7 +144,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=40.0, snapshot_freq=100)
+        solution(file; tf=20.0, snapshot_freq=10)
     end
 end
 
@@ -227,7 +255,7 @@ end
 
 periods = map(x -> mean(diff(results.t[x[2].indices])), peaks)
 
-Pr = 1 / periods.Cl
+St = 1 / periods.Cl
 
 oscillations = map(peaks) do p
     (a, b) = map(x -> mean(x.heights), p)
