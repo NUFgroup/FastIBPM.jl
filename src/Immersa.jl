@@ -53,6 +53,7 @@ export AbstractBody, AbstractPrescribedBody, StaticBody, MovingBody, GeometricNo
 export StructureBC
 
 # Immersed boundary problem setup and solvers
+export AbstractFormulation, FastIBPM
 export IBProblem
 export set_time!,
     step!, zero_vorticity!, apply_vorticity!, surface_force!, surface_force_sum
