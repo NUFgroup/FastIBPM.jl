@@ -69,33 +69,51 @@ export log_timestep
 # here to assemble the full immersed boundary solver framework.
 
 # FFT-based real-to-real transforms and Poisson solvers
-include("fft_r2r.jl")
+include("utils/fft_r2r.jl")
 using .fft_r2r
 
-include("offset_tuples.jl")
+include("utils/offset_tuples.jl")
 using .offset_tuples
 
 # General-purpose numerical and array utilities
-include("utilities.jl")
+include("utils/utilities.jl")
 using .utilities
 
-include("array_pools.jl")
+include("utils/array_pools.jl")
 using .array_pools
 
-# Problem setup and initialization routines
-include("problems.jl")
+# Eulerian (fluid) grid: staggered grid types, coordinates, index helpers, allocators
+include("fluid_domain/eulerian_grid.jl")
+
+# Lagrangian (body) grid: AbstractBody root type and BodyPoints marker container
+include("body_domain/lagrangian_grid.jl")
 
 # Models for prescribed (kinematically constrained) bodies
-include("prescribed_bodies.jl")
+include("body_domain/body_ops/prescribed_bodies.jl")
 
 # Models for deformable bodies
-include("structural_bodies.jl")
+include("body_domain/body_ops/structural_bodies.jl")
 
-# Discrete differential operators and grid mappings
-include("operators.jl")
+# Fluid-domain operators: kinematic (rot/curl/nonlinear), spectral Laplacian, and
+# multidomain multigrid Poisson solver.
+include("fluid_domain/fluid_ops/kinematic_ops.jl")
+include("fluid_domain/fluid_ops/laplacian_solver.jl")
+include("fluid_domain/fluid_ops/multi_domain.jl")
 
-#CNAB time integration scheme implementation
-include("cnab.jl")
+# Interface coupling: Reg struct, delta functions, E/Eᵀ operators.
+# TODO: some methods here dispatch on CNAB (defined below) — circular dependency deferred.
+#       See interface_coupling.jl header for details and resolution options.
+include("interface-coupling/interface_coupling.jl")
+
+# Problem definition + CNAB state + initialization routines.
+# Must come AFTER interface_coupling.jl because CNAB{..., R<:Reg, ...} requires Reg defined first.
+include("init/problems.jl")
+
+# CNAB time-stepping: per-iteration routines (step!, prediction, coupling, projection, velocity recovery)
+include("time_stepping/cnab.jl")
+
+# Post-processing: checkpoint I/O and surface force extraction
+include("post_proc/post_proc.jl")
 
 """
     load!(filename::AbstractString, x)
