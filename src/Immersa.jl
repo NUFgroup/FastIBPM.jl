@@ -100,14 +100,16 @@ include("fluid_domain/fluid_ops/kinematic_ops.jl")
 include("fluid_domain/fluid_ops/laplacian_solver.jl")
 include("fluid_domain/fluid_ops/multi_domain.jl")
 
-# Interface coupling: Reg struct, delta functions, E/Eᵀ operators.
-# TODO: some methods here dispatch on CNAB (defined below) — circular dependency deferred.
-#       See interface_coupling.jl header for details and resolution options.
+# Interface coupling (regularization machinery): Reg struct, delta functions, E/Eᵀ operators.
+# Included BEFORE init/problems.jl because CNAB{..., R<:Reg, ...} requires Reg defined first.
 include("interface-coupling/interface_coupling.jl")
 
 # Problem definition + CNAB state + initialization routines.
-# Must come AFTER interface_coupling.jl because CNAB{..., R<:Reg, ...} requires Reg defined first.
 include("init/problems.jl")
+
+# Interface coupling (force redistribution): _f_tilde_factor, f_to_f_tilde!, redist!,
+# update_redist_weights!. These dispatch on CNAB, so they must come AFTER init/problems.jl.
+include("interface-coupling/force_redistribution.jl")
 
 # CNAB time-stepping: per-iteration routines (step!, prediction, coupling, projection, velocity recovery)
 include("time_stepping/cnab.jl")

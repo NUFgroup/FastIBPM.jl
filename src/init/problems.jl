@@ -122,6 +122,24 @@ function surface_force_sum end
 # Coupler types, CNAB struct, constructor, and initialization routines
 # (moved from cnab.jl)
 # ---------------------------------------------------------------------------
+
+"""
+    AbstractCoupler
+
+Abstract interface for coupling strategies in the CNAB time integration framework.
+
+This type defines a common interface for different coupler implementations that manage interactions between PDE components or immersed bodies during time integration. Specific couplers include:
+
+- `NothingCoupler`          : No coupling required.
+- `PrescribedBodyCoupler`   : For bodies with prescribed motion or known behavior.
+- `FsiCoupler`              : For fluid-structure interaction problems.
+
+# Arguments
+None.
+
+# Returns
+An abstract type that serves as a base for all coupling strategies used in CNAB-based simulations.
+"""
 abstract type AbstractCoupler end
 
 """
