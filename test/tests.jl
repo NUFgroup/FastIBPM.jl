@@ -2,9 +2,9 @@ module Tests
 
 using Immersa
 using Immersa: @loop, _set!
-using Immersa.ArrayPools
-using Immersa.OffsetTuples
-using Immersa.Utilities
+using Immersa.array_pools
+using Immersa.offset_tuples
+using Immersa.utilities
 using KernelAbstractions
 using GPUArrays
 using OffsetArrays: OffsetArray, no_offset_view
@@ -14,7 +14,7 @@ using Test
 using Random
 
 import FFTW
-import Immersa: FFT_R2R
+import Immersa: fft_r2r
 
 _backend(array) = get_backend(convert(array, [0]))
 
@@ -236,7 +236,7 @@ function test_fft_r2r(array, kind, sz, dimss)
         x2 = array(x1)
 
         p1 = FFTW.plan_r2r!(x1, kind, dims)
-        p2 = FFT_R2R.bad_plan_r2r!(x2, Val.(kind), dims)
+        p2 = fft_r2r.bad_plan_r2r!(x2, Val.(kind), dims)
 
         mul!(x1, p1, x1)
         mul!(x2, p2, x2)
@@ -376,6 +376,233 @@ function test_curl(array, ::Val{3})
         R = (2:4, 0:3, -1:1)
 
         test_curl(array, grid, ψ, R)
+    end
+    nothing
+end
+
+function test_divergence(array, grid::Grid{N}, u_true::LinearFunc{3}, R) where {N}
+    if N == 2
+        @assert _is_xy(u_true)
+    end
+
+    # For a linear velocity field, ∇·u is the constant sum of the diagonal.
+    d_true(_) = _div(u_true)
+
+    # Divergence at cell I reads u[j] at I and I+δ(j), so pad velocity one cell up.
+    Ru = map(r -> first(r):(last(r)+1), R)
+
+    u = _gridarray(u_true, array, grid, Loc_u, ntuple(_ -> Ru, 3))
+
+    # Pressure/divergence lives at cell centers (Loc_p = Node{Dual}); scalar field.
+    d_expect = _gridarray(d_true, array, grid, Loc_p(), R)
+    d_got = Immersa.divergence!(zero(d_expect), u; h=grid.h)
+
+    @test no_offset_view(d_got) ≈ no_offset_view(d_expect)
+
+    (; d_true, Ru, u, d_expect, d_got)
+end
+
+function test_divergence(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3),
+        u = _rand_xy(LinearFunc{3,Float64}),
+        R = (2:4, 0:3)
+
+        test_divergence(array, grid, u, R)
+    end
+    nothing
+end
+
+function test_divergence(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3),
+        u = rand(LinearFunc{3,Float64}),
+        R = (2:4, 0:3, -1:1)
+
+        test_divergence(array, grid, u, R)
+    end
+    nothing
+end
+
+function test_gradient(array, grid::Grid{N}, c::SVector{N}, c0, R) where {N}
+    # Scalar linear pressure p(x) = c·x + c0  ⇒  ∇p = c (constant per component).
+    p_true(x) = c ⋅ x + c0
+    g_true(_) = c
+
+    # Gradient at edge I reads p at I and I-δ(i), so pad pressure one cell down.
+    Rp = map(r -> (first(r)-1):last(r), R)
+
+    p = _gridarray(p_true, array, grid, Loc_p(), Rp)
+
+    g_expect = _gridarray(g_true, array, grid, Loc_u, ntuple(_ -> R, 3))
+    g_got = Immersa.gradient!(map(zero, g_expect), p; h=grid.h)
+
+    @test all(@. no_offset_view(g_got) ≈ no_offset_view(g_expect))
+
+    (; p_true, g_true, Rp, p, g_expect, g_got)
+end
+
+function test_gradient(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3),
+        c = rand(SVector{2,Float64}),
+        c0 = rand(),
+        R = (2:4, 0:3)
+
+        test_gradient(array, grid, c, c0, R)
+    end
+    nothing
+end
+
+function test_gradient(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3),
+        c = rand(SVector{3,Float64}),
+        c0 = rand(),
+        R = (2:4, 0:3, -1:1)
+
+        test_gradient(array, grid, c, c0, R)
+    end
+    nothing
+end
+
+function test_velocity_boundary(array, grid::Grid{N}, f) where {N}
+    backend = _backend(array)
+    ub = Immersa.boundary_zeros(backend, grid, Loc_u)
+    Immersa.set_velocity_boundary!(ub, grid, f)
+
+    # Every normal boundary face must hold f(x)[i]; degenerate faces stay empty.
+    ok = true
+    for i in 1:N
+        loc = Immersa.Edge{Immersa.Primal}(i)
+        faces = ub[i]
+        for idx in CartesianIndices(faces)
+            face = faces[idx]
+            isempty(face) && continue
+            _, j = Tuple(idx)
+            ok &= (j == i)   # only the normal (j==i) faces are populated
+            for I in CartesianIndices(face)
+                ok &= isapprox(face[I], f(coord(grid, loc, I))[i])
+            end
+        end
+    end
+    @test ok
+
+    (; ub,)
+end
+
+function test_velocity_boundary(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3),
+        f = _rand_xy(LinearFunc{3,Float64})
+
+        test_velocity_boundary(array, grid, f)
+    end
+    nothing
+end
+
+function test_velocity_boundary(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3),
+        f = rand(LinearFunc{3,Float64})
+
+        test_velocity_boundary(array, grid, f)
+    end
+    nothing
+end
+
+function test_laplacian(array, grid::Grid{N}, C::SMatrix{N,N}, R) where {N}
+    # Per-component quadratic velocity  u_i(x) = Σ_j C[i,j] x_j²  ⇒
+    # (∇²u)_i = 2 Σ_j C[i,j]  (constant). The second-difference stencil is exact
+    # for quadratics, so the discrete Laplacian matches to roundoff.
+    u_true(x) = SVector(ntuple(i -> sum(ntuple(j -> C[i, j] * x[j]^2, N)), N))
+    lap_true(_) = SVector(ntuple(i -> 2 * sum(ntuple(j -> C[i, j], N)), N))
+
+    # Laplacian at edge I reads u[i] at I and I±δ(j): pad one cell on both sides.
+    Ru = map(r -> (first(r)-1):(last(r)+1), R)
+
+    u = _gridarray(u_true, array, grid, Loc_u, ntuple(_ -> Ru, 3))
+
+    lap_expect = _gridarray(lap_true, array, grid, Loc_u, ntuple(_ -> R, 3))
+    lap_got = Immersa.laplacian!(map(zero, lap_expect), u; h=grid.h)
+
+    @test all(@. no_offset_view(lap_got) ≈ no_offset_view(lap_expect))
+
+    (; u_true, lap_true, Ru, u, lap_expect, lap_got)
+end
+
+function test_laplacian(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3),
+        C = rand(SMatrix{2,2,Float64}),
+        R = (2:4, 0:3)
+
+        test_laplacian(array, grid, C, R)
+    end
+    nothing
+end
+
+function test_laplacian(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3),
+        C = rand(SMatrix{3,3,Float64}),
+        R = (2:4, 0:3, -1:1)
+
+        test_laplacian(array, grid, C, R)
+    end
+    nothing
+end
+
+function test_laplacian_bc(array, grid::Grid{N}, f) where {N}
+    backend = _backend(array)
+    T = Float64
+    loc(i) = Loc_u(i)
+    interior(i) = cell_axes(grid, loc(i), ExcludeBoundary())
+    pad(r) = (first(r)-1):(last(r)+1)
+
+    # `ufull`: prescribed field f on interior + one ghost ring; `uzero`: same but
+    # with the ring zeroed. Then, exactly, laplacian(uzero) + bc1 == laplacian(ufull).
+    ufull = ntuple(N) do i
+        _gridarray(x -> f(x)[i], array, grid, loc(i), pad.(interior(i)))
+    end
+    uzero = ntuple(N) do i
+        Rp = pad.(interior(i))
+        z = OffsetArray(convert(array, zeros(T, length.(Rp))), Rp...)
+        Re = CartesianIndices(Base.IdentityUnitRange.(interior(i)))
+        _set!((@view z[Re]), (@view ufull[i][Re]))
+        z
+    end
+
+    lapof(field) = ntuple(N) do i
+        Re = interior(i)
+        out = OffsetArray(convert(array, zeros(T, length.(Re))), Re...)
+        a = field[i]
+        @loop backend (I in CartesianIndices(out)) out[I] = Immersa.laplacian(a, I; h=grid.h)
+        out
+    end
+    lap_full = lapof(ufull)
+    lap_zero = lapof(uzero)
+
+    bc1 = ntuple(N) do i
+        Re = interior(i)
+        OffsetArray(convert(array, zeros(T, length.(Re))), Re...)
+    end
+    Immersa.add_laplacian_bc!(bc1, Loc_u, 1 / grid.h^2, f, grid)
+
+    @test all(1:N) do i
+        no_offset_view(lap_zero[i]) .+ no_offset_view(bc1[i]) ≈ no_offset_view(lap_full[i])
+    end
+
+    (; ufull, uzero, lap_full, lap_zero, bc1)
+end
+
+# quadratic per-component field ⇒ ∇²f is a nonzero constant, so the split identity
+# is exercised with both sides nonzero.
+_quad_field(C::SMatrix{N,N}) where {N} =
+    x -> SVector(ntuple(i -> sum(ntuple(j -> C[i, j] * x[j]^2, N)), N))
+
+function test_laplacian_bc(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3)
+        test_laplacian_bc(array, grid, _quad_field(rand(SMatrix{2,2,Float64})))
+    end
+    nothing
+end
+
+function test_laplacian_bc(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3)
+        test_laplacian_bc(array, grid, _quad_field(rand(SMatrix{3,3,Float64})))
     end
     nothing
 end

@@ -208,7 +208,7 @@ function prediction_step!(sol::CNAB{N,T}, level, u_work) where {N,T}
     if level < grid.levels
         with_arrays(sol.bndry_pool, (T, sol.ω_bndry)) do ψb
             multidomain_interpolate!(ψb, sol.ψ[level+1]; n=grid.n)
-            add_laplacian_bc!(ωˢ, a / h^2, ψb)
+            add_laplacian_bc!(ωˢ, Loc_ω, a / h^2, ψb)
         end
     end
 

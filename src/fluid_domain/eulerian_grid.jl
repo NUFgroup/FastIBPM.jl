@@ -79,6 +79,16 @@ Type alias for vorticity, stored on the edges of the `Dual` grid.
 """
 const Loc_ω = Edge{Dual}
 
+"""
+    const Loc_p = Node{Dual}
+
+Type alias for pressure (and any other cell-centered scalar), stored at the
+centers of the `Dual` grid cells. This is the natural location for the
+primitive-variable formulation, where `p` sits at cell centers and the discrete
+divergence `∇ · u` maps velocity edges to this location.
+"""
+const Loc_p = Node{Dual}
+
 # ---------------------------------------------------------------------------
 # Grid struct
 # ---------------------------------------------------------------------------
@@ -203,6 +213,23 @@ the edge's direction `i`.
 """
 _cellcoord((; i)::Edge{Dual}, ::Val{N}) where {N} = SVector(ntuple(==(i), N)) / 2
 
+"""
+    _cellcoord(loc::Node{Primal}, ::Val{N})
+
+Fractional cell offset for a `Primal` node (grid vertex): zero offset in every
+direction, i.e. the variable sits on the cell corners.
+"""
+_cellcoord(::Node{Primal}, ::Val{N}) where {N} = SVector(ntuple(_ -> 0, N)) / 2
+
+"""
+    _cellcoord(loc::Node{Dual}, ::Val{N})
+
+Fractional cell offset for a `Dual` node (cell center): half-cell offset in
+*every* direction, i.e. the variable sits at the center of each cell (where the
+pressure lives).
+"""
+_cellcoord(::Node{Dual}, ::Val{N}) where {N} = SVector(ntuple(_ -> 1, N)) / 2
+
 # ---------------------------------------------------------------------------
 # Boundary flags
 # ---------------------------------------------------------------------------
@@ -261,6 +288,20 @@ Index ranges for a grid location, *excluding* boundaries (interior only).
 """
 function cell_axes(n::SVector{N}, loc::Edge, ::ExcludeBoundary) where {N}
     ntuple(j -> _on_bndry(loc, j) ? (1:(n[j]-1)) : (0:(n[j]-1)), Val(N))
+end
+
+"""
+    cell_axes(n::SVector{N}, loc::Node{Dual}, bndry)
+
+Index ranges for a cell-centered (`Dual` node) scalar field, e.g. pressure. The
+`n` cell centers span `0:(n[j]-1)` in each direction. Unlike edges, no cell
+center lies on the domain boundary, so the `IncludeBoundary`/`ExcludeBoundary`
+flag does not change the result.
+"""
+function cell_axes(
+    n::SVector{N}, ::Node{Dual}, ::Union{IncludeBoundary,ExcludeBoundary}
+) where {N}
+    ntuple(j -> 0:(n[j]-1), Val(N))
 end
 
 """

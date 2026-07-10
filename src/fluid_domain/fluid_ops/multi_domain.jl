@@ -194,20 +194,41 @@ function set_boundary!(ω, ωb)
 end
 
 """
-    add_laplacian_bc!(Lψ, factor, ψb)
+    add_laplacian_bc!(rhs, loc, factor, bc)
 
-Add inter-level boundary condition corrections to the Laplacian RHS `Lψ`.
+Fold the discrete Laplacian's boundary contribution into the interior
+right-hand side `rhs`, in place (explicit-RHS, additive: `rhs += factor · L_Γ bc`).
 
-When solving on a non-coarsest level the streamfunction from the coarser
-level provides Dirichlet-like boundary values. This function folds those
-values into `Lψ` so the interior solve sees the correct right-hand side.
+This is the master entry point; the field location `loc` selects the stencil
+geometry, which differs between the two staggerings:
+  - `Loc_ω` (`Edge{Dual}`) — streamfunction-vorticity: `bc` holds the inter-level
+    Dirichlet values of ψ; see [`_add_laplacian_bc_sv!`](@ref).
+  - `Loc_u` (`Edge{Primal}`) — primitive variables: `bc` holds the prescribed
+    velocity on the domain boundary (`bc1`); see [`_add_laplacian_bc_primitive!`](@ref).
+
+# Arguments
+- `rhs`: interior arrays for the Laplacian RHS (modified in-place).
+- `loc`: field location tag (`Loc_ω` or `Loc_u`) selecting the implementation.
+- `factor`: scaling factor (e.g. `1 / h²`, or the viscous `a / h²`).
+- `bc`: boundary buffer carrying the known boundary values.
+"""
+add_laplacian_bc!(rhs, ::Type{<:Edge{Dual}}, factor, bc) =
+    _add_laplacian_bc_sv!(rhs, factor, bc)
+
+"""
+    _add_laplacian_bc_sv!(Lψ, factor, ψb)
+
+Streamfunction-vorticity (`Loc_ω`, dual-edge) implementation of the Laplacian
+boundary fold. When solving on a non-coarsest level the streamfunction from the
+coarser level provides Dirichlet-like boundary values; this folds those values
+into `Lψ` so the interior solve sees the correct right-hand side.
 
 # Arguments
 - `Lψ`: Vector of interior arrays for the Laplacian RHS (modified in-place).
 - `factor`: Scaling factor (typically `1 / h²`).
 - `ψb`: Boundary buffer populated by `multidomain_interpolate!`.
 """
-function add_laplacian_bc!(Lψ, factor, ψb)
+function _add_laplacian_bc_sv!(Lψ, factor, ψb)
     backend = get_backend(Lψ[3])
 
     for i in eachindex(Lψ), j in 1:ndims(Lψ[i]), dir in 1:2
@@ -241,7 +262,7 @@ end
     laplacian_bc_ii(ψb, i, dir, I)
 
 Compute the diagonal Laplacian boundary correction for the component `i` face
-in direction `dir` at interior index `I`. Helper for `add_laplacian_bc!`.
+in direction `dir` at interior index `I`. Helper for `_add_laplacian_bc_sv!`.
 """
 function laplacian_bc_ii(ψb, i, dir, I)
     δ = axisunit(I)
@@ -302,7 +323,7 @@ function multidomain_poisson!(ω, ψ, u, ψb, grid::Grid, fft_plan)
             for i in eachindex(ψe)
                 _set!(ψe[i], ω[level][i])
             end
-            add_laplacian_bc!(ψe, 1 / h^2, ψb)
+            add_laplacian_bc!(ψe, Loc_ω, 1 / h^2, ψb)
         end
 
         EigenbasisTransform(λ -> -1 / (λ / h^2), fft_plan)(ψe, ψe)

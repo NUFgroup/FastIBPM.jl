@@ -57,7 +57,9 @@ methods (time stepping, Poisson solves, field allocations) can be selected
 at compile time without runtime branches.
 
 Current subtypes:
-- `FastIBPM` — streamfunction-vorticity (nullspace) formulation.
+- `FastIBPM` — streamfunction-vorticity (nullspace) formulation. Colonius & Taira (2008)
+- `IBPM` — primitive variables formulation. Taira & Colonius (2007)
+- `IMAP` — primitive variables using the Interface Manifold Aware Projection Method. (in development)
 """
 abstract type AbstractFormulation end
 
@@ -73,6 +75,28 @@ This is the "nullspace" or "fast" approach from Colonius & Taira (2008).
 Primary state variables: vorticity `ω` and streamfunction `ψ`.
 """
 struct FastIBPM <: AbstractFormulation end
+
+"""
+    struct IBPM <: AbstractFormulation end
+
+Formulation tag for the primitive variables IBPM.
+
+TODO: Add description of the IBPM formulation, including its primary state variables and how it differs from FastIBPM.
+"""
+struct IBPM <: AbstractFormulation end
+
+"""
+    struct IMAP <: AbstractFormulation end
+
+Formulation tag for the primitive variables IMAP.
+
+IMAP uses principles from differential geometry to cast the no-slip condition
+as a constraint manifold. The flow is restricted to evolve along this manifold
+by designing computationally cheap surface-local projection operations.
+"""
+struct IMAP <: AbstractFormulation end
+
+# TODO: add flags for the CNAB using IBPM and IMAP in src/time_stepping/cnab.jl, and add the corresponding CNAB methods for these formulations.
 
 """
     struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow,F<:AbstractFormulation}

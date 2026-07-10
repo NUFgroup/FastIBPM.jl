@@ -25,6 +25,11 @@ arrays = [Array]
             Tests.test_nonlinear
             Tests.test_rot
             Tests.test_curl
+            Tests.test_divergence
+            Tests.test_gradient
+            Tests.test_velocity_boundary
+            Tests.test_laplacian
+            Tests.test_laplacian_bc
             Tests.test_laplacian_inv
             Tests.test_multidomain_coarsen
             Tests.test_multidomain_interpolate

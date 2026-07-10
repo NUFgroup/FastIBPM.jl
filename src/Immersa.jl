@@ -41,7 +41,7 @@ import FFTW
 # ------------------------------------------------------------------------
 # Core grid types and locations
 export GridKind, Primal, Dual
-export GridLocation, Node, Edge, Loc_u, Loc_ω
+export GridLocation, Node, Edge, Loc_u, Loc_ω, Loc_p
 export Grid, gridcorner, gridstep, coord, cell_axes, boundary_axes, grid_zeros
 export IncludeBoundary, ExcludeBoundary
 
