@@ -344,6 +344,13 @@ caller's index range / boundary data.
 # Returns
 Scalar value of `∇² a` at `I`.
 """
+# TODO(wall-dirichlet): this is a uniform (-2 per axis) stencil, correct for the
+# far-field/ghost BC where the prescribed value sits at the ghost node. A
+# wall-Dirichlet BC (value prescribed AT the wall) instead uses the extrapolation
+# u_ghost = 2*u_wall - u_interior, which changes the near-wall diagonal (-2 -> -3).
+# Supporting it needs a boundary-aware variant of this operator (e.g. a BC-type
+# tag on the L-apply path), on top of the bc1 RHS change and the ghost-ring
+# buffer noted at `set_velocity_boundary!`.
 function laplacian(a, I::CartesianIndex{N}; h) where {N}
     δ = axisunit(I)
     aI = a[I]
@@ -394,6 +401,16 @@ function set_velocity_boundary!(ub, grid, f)
     ub
 end
 
+# TODO(bc-ghost-ring): this buffer stores only the NORMAL boundary faces — all
+# that `divergence_bc!` (bc2) needs. The Laplacian bc1 additionally needs the
+# TRANSVERSE boundary values (a half-cell "ghost" just outside each wall), which
+# are not held here — so `_add_laplacian_bc_primitive!` evaluates `f` directly
+# instead of reading a buffer. To make bc1 and bc2 uniformly buffer-based, extend
+# this to a full "ghost ring" (normal faces + transverse ghosts) and let bc1 read
+# it. That same transverse-boundary storage is also the data layer a future
+# wall-Dirichlet BC would need (its extra requirement — an operator-diagonal
+# change — is noted at `laplacian`).
+
 """
     add_laplacian_bc!(rhs, Loc_u, factor, f, grid)
 
@@ -439,6 +456,52 @@ function _add_laplacian_bc_primitive!(rhs, factor, grid, f)
                 δ = axisunit(I)
                 a[I] += factor * f(coord(grid, loc, I + s * δ(j)))[i]
             end
+        end
+    end
+    rhs
+end
+
+"""
+    divergence_bc!(rhs, factor, ub)
+
+Fold the divergence operator's boundary contribution into the cell-centered RHS
+`rhs`, in place — the `bc2` term of the primitive-variable projection.
+
+The discrete divergence at a boundary-adjacent cell reads the prescribed normal
+velocity on ∂D. `ub` is the velocity boundary buffer (from
+[`set_velocity_boundary!`](@ref)), whose `ub[j][dir, j]` strips hold exactly
+those normal faces. For each boundary cell this adds (explicit-RHS, additive):
+
+    rhs[I] += factor · outward(dir) · ub[j][dir, j][face]
+
+so the boundary face enters with the same sign it carries in the divergence
+stencil (`-` on the low face, `+` on the high face). Pass `factor = 1/h` to
+obtain the boundary divergence `D∂ · u_BC` consistent with [`divergence!`](@ref);
+the continuity RHS is `bc2 = -D∂ · u_BC`, so negate in the assembly as needed.
+
+Unlike `bc1`, this reads only the normal boundary faces — the divergence never
+touches transverse/ghost velocities — so the normal-face buffer is sufficient.
+
+# Arguments
+- `rhs`: cell-centered scalar RHS (`Loc_p`; modified in-place).
+- `factor`: scaling factor (e.g. `1/h`).
+- `ub`: velocity boundary buffer holding the prescribed normal velocity on ∂D.
+
+# Returns
+The updated `rhs`.
+"""
+function divergence_bc!(rhs, factor, ub)
+    backend = get_backend(rhs)
+    ax = UnitRange.(axes(rhs))
+    for j in 1:ndims(rhs), dir in 1:2
+        face = ub[j][dir, j]
+        isempty(face) && continue
+        Iⱼ = (ax[j][begin], ax[j][end])[dir]
+        R = CartesianIndices(setindex(ax, Iⱼ:Iⱼ, j))
+        s = outward(dir)
+        @loop backend (I in R) begin
+            δ = axisunit(I)
+            rhs[I] += factor * s * face[I+(dir-1)*δ(j)]
         end
     end
     rhs

@@ -111,6 +111,10 @@ include("init/problems.jl")
 # update_redist_weights!. These dispatch on CNAB, so they must come AFTER init/problems.jl.
 include("interface-coupling/force_redistribution.jl")
 
+# Assembly operators (formulation-dispatched): viscous inverse (Ainv / Ainv!) and
+# body-coupling operators (B_*). Included before cnab.jl, which calls them.
+include("time_stepping/assembly_ops.jl")
+
 # CNAB time-stepping: per-iteration routines (step!, prediction, coupling, projection, velocity recovery)
 include("time_stepping/cnab.jl")
 

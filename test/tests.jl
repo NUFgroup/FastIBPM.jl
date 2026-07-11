@@ -607,6 +607,111 @@ function test_laplacian_bc(array, ::Val{3})
     nothing
 end
 
+function test_divergence_bc(array, grid::Grid{N}, f) where {N}
+    backend = _backend(array)
+    T = Float64
+    lu(j) = Loc_u(j)
+    Rfull(j) = cell_axes(grid, lu(j), IncludeBoundary())
+    Rint(j) = cell_axes(grid, lu(j), ExcludeBoundary())
+
+    # `u_full`: f on all faces; `u_int`: f on interior faces, 0 on the normal ∂D
+    # faces. Then, exactly, divergence(u_int) + bc2 == divergence(u_full).
+    u_full = ntuple(j -> _gridarray(x -> f(x)[j], array, grid, lu(j), Rfull(j)), N)
+    u_int = ntuple(N) do j
+        z = OffsetArray(convert(array, zeros(T, length.(Rfull(j)))), Rfull(j)...)
+        Re = CartesianIndices(Base.IdentityUnitRange.(Rint(j)))
+        _set!((@view z[Re]), (@view u_full[j][Re]))
+        z
+    end
+
+    d_full = Immersa.divergence!(grid_zeros(backend, grid, Loc_p()), u_full; h=grid.h)
+    d_int = Immersa.divergence!(grid_zeros(backend, grid, Loc_p()), u_int; h=grid.h)
+
+    ub = Immersa.boundary_zeros(backend, grid, Loc_u)
+    Immersa.set_velocity_boundary!(ub, grid, f)
+    bc2 = grid_zeros(backend, grid, Loc_p())
+    Immersa.divergence_bc!(bc2, 1 / grid.h, ub)
+
+    @test no_offset_view(d_int) .+ no_offset_view(bc2) ≈ no_offset_view(d_full)
+
+    (; u_full, u_int, d_full, d_int, bc2)
+end
+
+function test_divergence_bc(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3)
+        test_divergence_bc(array, grid, _quad_field(rand(SMatrix{2,2,Float64})))
+    end
+    nothing
+end
+
+function test_divergence_bc(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3)
+        test_divergence_bc(array, grid, _quad_field(rand(SMatrix{3,3,Float64})))
+    end
+    nothing
+end
+
+function test_Ainv(array, grid::Grid{N}; a=0.037, dt=0.02, n_taylor=3) where {N}
+    backend = _backend(array)
+    h = grid.h
+    interior(A) = CartesianIndices(map(r -> (first(r)+1):(last(r)-1), UnitRange.(axes(A))))
+
+    # Neumann telescoping identity (exact, any input):
+    #   (I - aL)(Bᴺ x / Δt) == x - (aL)ⁿ x .
+    x = Immersa.Ainv_zeros(backend, grid)
+    for i in eachindex(x)
+        A = x[i]
+        @loop backend (I in interior(A)) A[I] = sin(0.3 * sum(Tuple(I))) + 0.5 * i
+    end
+
+    y = Immersa.Ainv_zeros(backend, grid)
+    t1 = Immersa.Ainv_zeros(backend, grid)
+    t2 = Immersa.Ainv_zeros(backend, grid)
+    Immersa.Ainv!(y, x, t1, t2; a, dt, n_taylor, h)
+
+    # lhs = (y - aL y) / dt
+    dy = Immersa.Ainv_zeros(backend, grid)
+    Immersa._apply_aL!(dy, y, a, h)
+    lhs = Immersa.Ainv_zeros(backend, grid)
+    for i in eachindex(lhs)
+        L, Y, D = lhs[i], y[i], dy[i]
+        @loop backend (I in interior(L)) L[I] = (Y[I] - D[I]) / dt
+    end
+
+    # rhs = x - (aL)ⁿ x
+    p = Immersa.Ainv_zeros(backend, grid)
+    q = Immersa.Ainv_zeros(backend, grid)
+    for i in eachindex(p)
+        _set!(p[i], x[i])
+    end
+    for _ in 1:n_taylor
+        Immersa._apply_aL!(q, p, a, h)
+        for i in eachindex(p)
+            _set!(p[i], q[i])
+        end
+    end
+    rhs = Immersa.Ainv_zeros(backend, grid)
+    for i in eachindex(rhs)
+        R, X, P = rhs[i], x[i], p[i]
+        @loop backend (I in interior(R)) R[I] = X[I] - P[I]
+    end
+
+    # halos are zero in both, so a norm-based ≈ over the full arrays is relative.
+    @test all(i -> no_offset_view(lhs[i]) ≈ no_offset_view(rhs[i]), eachindex(lhs))
+
+    (; x, y, lhs, rhs)
+end
+
+function test_Ainv(array, ::Val{2})
+    test_Ainv(array, Grid(; h=0.05, n=(8, 16), x0=(-0.3, 0.4), levels=3))
+    nothing
+end
+
+function test_Ainv(array, ::Val{3})
+    test_Ainv(array, Grid(; h=0.05, n=(8, 16, 12), x0=(-0.3, 0.4, 0.1), levels=3))
+    nothing
+end
+
 function test_laplacian_inv(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}) where {N,T}
     @assert _div(ψ_true) < eps(T)
 
