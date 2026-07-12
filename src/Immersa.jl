@@ -56,7 +56,8 @@ export StructureBC
 export AbstractFormulation, FastIBPM
 export IBProblem
 export set_time!,
-    step!, zero_vorticity!, apply_vorticity!, surface_force!, surface_force_sum
+    step!, initialize_fields!, zero_vorticity!, zero_velocity!, zero_pressure!,
+    apply_vorticity!, surface_force!, surface_force_sum
 
 # Time integration and diagnostics
 export CNAB
@@ -104,8 +105,13 @@ include("fluid_domain/fluid_ops/multi_domain.jl")
 # Included BEFORE init/problems.jl because CNAB{..., R<:Reg, ...} requires Reg defined first.
 include("interface-coupling/interface_coupling.jl")
 
-# Problem definition + CNAB state + initialization routines.
+# Problem definition + CNAB integrator + initialization routines.
 include("init/problems.jl")
+
+# Formulation-specific solver state (FastIBPMState / IBPMState), its construction
+# (formulation_state) and reset (initialize_fields!). AFTER problems.jl, since the
+# reset routines dispatch on CNAB.
+include("init/state.jl")
 
 # Interface coupling (force redistribution): _f_tilde_factor, f_to_f_tilde!, redist!,
 # update_redist_weights!. These dispatch on CNAB, so they must come AFTER init/problems.jl.

@@ -137,13 +137,13 @@ levels and avoids unnecessary allocations with array pools.
 prediction_step!(sol::CNAB) = prediction_step!(sol, sol.prob.formulation)
 
 function prediction_step!(sol::CNAB, ::FastIBPM)
-    _cycle!(sol.nonlin)
+    _cycle!(sol.state.nonlin)
 
     for level in sol.prob.grid.levels:-1:1
         prediction_step!(sol, level)
     end
 
-    sol.nonlin_count = min(sol.nonlin_count + 1, length(sol.nonlin))
+    sol.state.nonlin_count = min(sol.state.nonlin_count + 1, length(sol.state.nonlin))
 end
 
 function prediction_step!(sol::CNAB{N,T}, level) where {N,T}
@@ -154,18 +154,18 @@ function prediction_step!(sol::CNAB{N,T}, level) where {N,T}
 end
 
 function prediction_step!(sol::CNAB{N,T}, level, u_work) where {N,T}
-    backend = get_backend(sol.u[1][1])
+    backend = get_backend(sol.state.u[1][1])
 
     grid = sol.prob.grid
     h = gridstep(grid, level)
-    ωˢ = grid_view(sol.ψ[level], grid, Loc_ω, ExcludeBoundary())
+    ωˢ = grid_view(sol.state.ψ[level], grid, Loc_ω, ExcludeBoundary())
     a = _A_factor(sol)
 
-    curl!(u_work, sol.ω[level]; h)
+    curl!(u_work, sol.state.ω[level]; h)
     rot!(ωˢ, u_work; h)
 
     for i in eachindex(ωˢ)
-        let ωˢ = ωˢ[i], ω = sol.ω[level][i]
+        let ωˢ = ωˢ[i], ω = sol.state.ω[level][i]
             @loop backend (I in CartesianIndices(ωˢ)) begin
                 ωˢ[I] = ω[I] - a * ωˢ[I]
             end
@@ -173,17 +173,17 @@ function prediction_step!(sol::CNAB{N,T}, level, u_work) where {N,T}
     end
 
     if level < grid.levels
-        with_arrays(sol.bndry_pool, (T, sol.ω_bndry)) do ψb
-            multidomain_interpolate!(ψb, sol.ψ[level+1]; n=grid.n)
+        with_arrays(sol.bndry_pool, (T, sol.state.ω_bndry)) do ψb
+            multidomain_interpolate!(ψb, sol.state.ψ[level+1]; n=grid.n)
             add_laplacian_bc!(ωˢ, Loc_ω, a / h^2, ψb)
         end
     end
 
-    nonlin_full = sol.nonlin_count == length(sol.nonlin)
+    nonlin_full = sol.state.nonlin_count == length(sol.state.nonlin)
 
     if nonlin_full
-        for i_step in eachindex(sol.nonlin), i in eachindex(ωˢ)
-            let ωˢ = ωˢ[i], N = sol.nonlin[i_step][level][i], k = sol.dt * sol.β[end-i_step]
+        for i_step in eachindex(sol.state.nonlin), i in eachindex(ωˢ)
+            let ωˢ = ωˢ[i], N = sol.state.nonlin[i_step][level][i], k = sol.dt * sol.β[end-i_step]
                 @loop backend (I in CartesianIndices(ωˢ)) begin
                     ωˢ[I] = ωˢ[I] + k * N[I]
                 end
@@ -191,12 +191,12 @@ function prediction_step!(sol::CNAB{N,T}, level, u_work) where {N,T}
         end
     end
 
-    nonlinear!(u_work, sol.u[level], sol.ω[level])
-    rot!(sol.nonlin[end][level], u_work; h)
+    nonlinear!(u_work, sol.state.u[level], sol.state.ω[level])
+    rot!(sol.state.nonlin[end][level], u_work; h)
 
     for i in eachindex(ωˢ)
         let ωˢ = ωˢ[i],
-            N = sol.nonlin[end][level][i],
+            N = sol.state.nonlin[end][level][i],
             k = nonlin_full ? sol.dt * sol.β[end] : sol.dt
 
             @loop backend (I in CartesianIndices(ωˢ)) begin
@@ -229,7 +229,7 @@ coupling_step!(sol::CNAB, ::FastIBPM) = _coupling_step!(sol, sol.coupler)
 
 function _coupling_step!(sol::CNAB{N,T}, coupler::PrescribedBodyCoupler) where {N,T}
     with_arrays_like(sol.body_pool, sol.f_tilde) do rhs
-        with_arrays(sol.bndry_pool, (T, sol.ω_bndry)) do ψ_b_work
+        with_arrays(sol.bndry_pool, (T, sol.state.ω_bndry)) do ψ_b_work
             _coupling_step!(sol, coupler, rhs, ψ_b_work)
         end
     end
@@ -238,11 +238,11 @@ end
 function _coupling_step!(sol::CNAB, coupler::PrescribedBodyCoupler, rhs, ψ_b_work)
     grid = sol.prob.grid
     body = sol.prob.body
-    ωˢ = sol.ψ
-    ψ = (sol.ω[1],)
-    u¹ = sol.u[1]
+    ωˢ = sol.state.ψ
+    ψ = (sol.state.ω[1],)
+    u¹ = sol.state.u[1]
 
-    multidomain_poisson!(ωˢ, ψ, (u¹,), ψ_b_work, grid, sol.plan)
+    multidomain_poisson!(ωˢ, ψ, (u¹,), ψ_b_work, grid, sol.state.plan)
     add_flow!(u¹, sol.prob.u0, grid, 1, sol.i, sol.t)
 
     update_body_points!(sol.points, body, sol.i, sol.t)
@@ -285,7 +285,7 @@ Nothing. Updates the solver state in place.
 function _coupling_step!(sol::CNAB{N,T}, coupler::FsiCoupler) where {N,T}
     with_arrays_like(sol.body_pool, ntuple(_ -> sol.f_tilde, 3)...) do fs...
         with_arrays_like(sol.structure_pool, ntuple(_ -> coupler.state.χ, 8)...) do χs...
-            with_arrays(sol.bndry_pool, (T, sol.ω_bndry)) do ψ_b_work
+            with_arrays(sol.bndry_pool, (T, sol.state.ω_bndry)) do ψ_b_work
                 _coupling_step!(sol, coupler, fs, χs, ψ_b_work)
             end
         end
@@ -308,11 +308,11 @@ function _coupling_step!(sol::CNAB{N,T}, coupler::FsiCoupler, fs, χs, ψ_b_work
         B_deform_mul!(y, x, sol)
     end
 
-    ωˢ = sol.ψ
-    ψ = (sol.ω[1],)
-    u¹ = sol.u[1]
+    ωˢ = sol.state.ψ
+    ψ = (sol.state.ω[1],)
+    u¹ = sol.state.u[1]
 
-    multidomain_poisson!(ωˢ, ψ, (u¹,), ψ_b_work, grid, sol.plan)
+    multidomain_poisson!(ωˢ, ψ, (u¹,), ψ_b_work, grid, sol.state.plan)
     add_flow!(u¹, sol.prob.u0, grid, 1, sol.i, sol.t)
 
     i_deform = deforming_point_range(body)
@@ -408,8 +408,8 @@ ensuring that the flow field satisfies the updated constraints after force sprea
 - `sol::CNAB`: The CNAB solver object containing the fluid and body state.
 
 # Effects
-- Modifies `sol.ω` in-place to account for the applied body forces.
-- Swaps `sol.ω` and `sol.ψ` internally to reuse memory.
+- Modifies `sol.state.ω` in-place to account for the applied body forces.
+- Swaps `sol.state.ω` and `sol.state.ψ` internally to reuse memory.
 
 # Returns
 - `nothing`: The projection modifies the solver state in-place.
@@ -418,7 +418,7 @@ projection_step!(sol::CNAB) = projection_step!(sol, sol.prob.formulation)
 
 function projection_step!(sol::CNAB{N,T}, ::FastIBPM) where {N,T}
     grid = sol.prob.grid
-    backend = get_backend(sol.u[1][1])
+    backend = get_backend(sol.state.u[1][1])
 
     u_axes = cell_axes(grid, Loc_u, IncludeBoundary())
     ω_axes = cell_axes(grid, Loc_ω, ExcludeBoundary())
@@ -428,10 +428,10 @@ function projection_step!(sol::CNAB{N,T}, ::FastIBPM) where {N,T}
         rot!(ω_work, u_work; h=grid.h)
         Ainv(sol, 1)(ω_work, ω_work)
 
-        (sol.ω, sol.ψ) = (sol.ψ, sol.ω)
+        (sol.state.ω, sol.state.ψ) = (sol.state.ψ, sol.state.ω)
 
         for i in eachindex(ω_work)
-            let ω = sol.ω[1][i], ω_work = ω_work[i]
+            let ω = sol.state.ω[1][i], ω_work = ω_work[i]
                 @loop backend (I in CartesianIndices(ω_work)) begin
                     ω[I] -= ω_work[I]
                 end
@@ -450,21 +450,21 @@ to satisfy boundary conditions and base flow.
 - `sol::CNAB`: The CNAB solver object containing the fluid and body state.
 
 # Effects
-- Updates `sol.u` (velocity field) and ensures `sol.ω` satisfies boundary conditions.
+- Updates `sol.state.u` (velocity field) and ensures `sol.state.ω` satisfies boundary conditions.
 - Handles all multigrid levels, applying necessary interpolations between levels.
 
 # Returns
 - `nothing`: Modifies the solver state in-place.
 """
 function apply_vorticity!(sol::CNAB{N,T}) where {N,T}
-    with_arrays(sol.bndry_pool, (T, sol.ω_bndry)) do ψ_b_work
+    with_arrays(sol.bndry_pool, (T, sol.state.ω_bndry)) do ψ_b_work
         apply_vorticity!(sol, ψ_b_work)
     end
 end
 
 function apply_vorticity!(sol::CNAB, ψ_b_work)
     grid = sol.prob.grid
-    multidomain_poisson!(sol.ω, sol.ψ, sol.u, ψ_b_work, grid, sol.plan)
+    multidomain_poisson!(sol.state.ω, sol.state.ψ, sol.state.u, ψ_b_work, grid, sol.state.plan)
 
     for level in 1:grid.levels
         if level == grid.levels
@@ -472,12 +472,12 @@ function apply_vorticity!(sol::CNAB, ψ_b_work)
                 foreach(b -> fill!(b, 0), ψ_b_work[i])
             end
         else
-            multidomain_interpolate!(ψ_b_work, sol.ω[level+1]; n=grid.n)
+            multidomain_interpolate!(ψ_b_work, sol.state.ω[level+1]; n=grid.n)
         end
 
-        set_boundary!(sol.ω[level], ψ_b_work)
+        set_boundary!(sol.state.ω[level], ψ_b_work)
 
-        add_flow!(sol.u[level], sol.prob.u0, grid, level, sol.i, sol.t)
+        add_flow!(sol.state.u[level], sol.prob.u0, grid, level, sol.i, sol.t)
     end
 end
 

@@ -98,7 +98,7 @@ This function corrects the body forces `f` after numerical operations by:
 - `nothing`: The input `f` is updated in-place.
 """
 function redist!(f, sol::CNAB{N,T}) where {N,T}
-    with_arrays_like(sol.fluid_pool, sol.u[1]) do u_work
+    with_arrays_like(sol.fluid_pool, sol.state.u[1]) do u_work
         regularize!(u_work, sol.reg, f)
 
         for i in eachindex(u_work)

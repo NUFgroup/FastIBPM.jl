@@ -712,6 +712,160 @@ function test_Ainv(array, ::Val{3})
     nothing
 end
 
+function test_Q(array, grid::Grid{N}, xb) where {N}
+    backend = _backend(array)
+    T = Float64
+    h = grid.h
+    nb = length(xb)
+    reg = Immersa.Reg(backend, T, Immersa.DeltaYang3S(), nb, Val(N))
+    Immersa.update_weights!(reg, grid, xb, eachindex(xb))
+
+    interior(A) = CartesianIndices(Immersa._interior_range(A))
+
+    # Adjoint identity  <Q λ, q> == <λ, Qᵀ q>,  with λ = (φ, f_tilde).
+    # This checks Gᵀ = -D and that E/Eᵀ are exact transposes at once — the
+    # symmetry that makes the modified Poisson operator QᵀBᴺQ solvable by CG.
+    q = Immersa.Ainv_zeros(backend, grid)
+    for i in eachindex(q)
+        A = q[i]
+        @loop backend (I in interior(A)) A[I] = sin(0.7 * sum(Tuple(I))) + 0.3 * i
+    end
+    φ = grid_zeros(backend, grid, Loc_p())
+    @loop backend (I in CartesianIndices(φ)) φ[I] = cos(0.4 * sum(Tuple(I)))
+    f_tilde = (array ∘ map)(1:nb) do k
+        SVector(ntuple(i -> sin(0.9 * (k + i)), N))
+    end
+
+    Qλ = Immersa.Ainv_zeros(backend, grid)
+    Immersa.Q_mul!(Qλ, φ, f_tilde, reg; h)
+
+    φ_out = grid_zeros(backend, grid, Loc_p())
+    f_out = KernelAbstractions.zeros(backend, SVector{N,T}, nb)
+    Immersa.QT_mul!(φ_out, f_out, q, reg; h)
+
+    lhs = sum(i -> sum(no_offset_view(Qλ[i]) .* no_offset_view(q[i])), eachindex(q))
+    rhs =
+        sum(no_offset_view(φ) .* no_offset_view(φ_out)) +
+        sum(dot.(Array(f_tilde), Array(f_out)))
+
+    @test lhs ≈ rhs
+
+    (; q, φ, f_tilde, Qλ, φ_out, f_out)
+end
+
+function test_Q(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(40, 40), x0=(-1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end
+
+        test_Q(array, grid, xb)
+    end
+    nothing
+end
+
+function test_Q(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(40, 40, 40), x0=(-1.0, -1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 1, nb)) do t
+            a = 2π * t
+            SVector(0.5cos(a), 0.5sin(a), 0.5 * (2t - 1))
+        end
+
+        test_Q(array, grid, xb)
+    end
+    nothing
+end
+
+function test_B(array, grid::Grid{N}, xb; Re=100.0, dt=0.01, n_taylor=3) where {N}
+    backend = _backend(array)
+    T = Float64
+    h = grid.h
+    # a = Δt/(2Re). Keeping a/h² ≪ 1 is what makes the Bᴺ Taylor series converge
+    # (the paper's νΔt/Δx² ≲ 1 condition); otherwise B is wildly ill-conditioned.
+    a = dt / (2Re)
+    nb = length(xb)
+    reg = Immersa.Reg(backend, T, Immersa.DeltaYang3S(), nb, Val(N))
+    Immersa.update_weights!(reg, grid, xb, eachindex(xb))
+    work = Immersa.B_work(backend, grid)
+    form = Immersa.IBPM()
+
+    zλ() = (
+        grid_zeros(backend, grid, Loc_p()),
+        KernelAbstractions.zeros(backend, SVector{N,T}, nb),
+    )
+    function applyB(p, f)
+        po, fo = zλ()
+        Immersa.B_mul!(po, fo, p, f, reg, work, form; h, a, dt, n_taylor)
+        (po, fo)
+    end
+    ip(x, y) =
+        sum(no_offset_view(x[1]) .* no_offset_view(y[1])) +
+        sum(dot.(Array(x[2]), Array(y[2])))
+    function mkλ(c)
+        p, f = zλ()
+        @loop backend (I in CartesianIndices(p)) p[I] = sin(c * sum(Tuple(I)))
+        f .= (array ∘ map)(1:nb) do k
+            SVector(ntuple(i -> cos(c * (k + i)), N))
+        end
+        (p, f)
+    end
+
+    λ = mkλ(0.4)
+    μ = mkλ(0.9)
+
+    # 1. Symmetry ⟨Bλ, μ⟩ == ⟨λ, Bμ⟩ — the property that makes CG applicable.
+    @test ip(applyB(λ...), μ) ≈ ip(λ, applyB(μ...))
+
+    # 2. The constant-pressure mode is exactly in the null space (G kills a constant),
+    #    which is why one pressure DOF must be pinned.
+    let (pc, fc) = zλ()
+        @loop backend (I in CartesianIndices(pc)) pc[I] = 1
+        Bc = applyB(pc, fc)
+        @test ip(Bc, Bc) ≈ 0 atol = 1e-18
+    end
+
+    # 3. CG (pressure pinned) inverts B: recover a known λ from rhs = B λ.
+    Binv = Immersa.CNAB_Binv_Iterative{T}(; abstol=1e-10, reltol=0.0, pin=1)
+    p_true, f_true = mkλ(0.6)
+    no_offset_view(p_true)[Binv.pin] = 0
+    rp, rf = applyB(p_true, f_true)
+
+    p, f = zλ()
+    Binv(p, f, rp, rf, reg, work, form; h, a, dt, n_taylor)
+
+    @test no_offset_view(p) ≈ no_offset_view(p_true) rtol = 1e-6
+    @test Array(f) ≈ Array(f_true) rtol = 1e-6
+
+    (; p, f, p_true, f_true)
+end
+
+function test_B(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(40, 40), x0=(-1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end
+
+        test_B(array, grid, xb)
+    end
+    nothing
+end
+
+function test_B(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(40, 40, 40), x0=(-1.0, -1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 1, nb)) do t
+            s = 2π * t
+            SVector(0.5cos(s), 0.5sin(s), 0.5 * (2t - 1))
+        end
+
+        test_B(array, grid, xb)
+    end
+    nothing
+end
+
 function test_laplacian_inv(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}) where {N,T}
     @assert _div(ψ_true) < eps(T)
 
@@ -1052,12 +1206,12 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
     end
 
     sol0 = map(1:length(sol.β)) do _
-        s = deepcopy((; u=sol.u[1], ω=sol.ω[1]))
+        s = deepcopy((; u=sol.state.u[1], ω=sol.state.ω[1]))
         step!(sol)
         s
     end
 
-    Immersa.interpolate_body!(f_work, sol.reg, sol.u[1])
+    Immersa.interpolate_body!(f_work, sol.reg, sol.state.u[1])
     unflatten(x) = reinterpret(reshape, T, x)
     @test unflatten(f_work) ≈ unflatten(sol.points.u) atol = 1e-4
 
@@ -1074,7 +1228,7 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
     end
 
     for i in eachindex(ω)
-        let ω0 = sol0[end].ω[i], ω1 = sol.ω[1][i], ω_work_b = ω_work_bounds[i]
+        let ω0 = sol0[end].ω[i], ω1 = sol.state.ω[1][i], ω_work_b = ω_work_bounds[i]
             @loop backend (I in CartesianIndices(ω0)) ω_work_b[I] = ω0[I] + ω1[I]
         end
     end
@@ -1097,7 +1251,7 @@ function test_cnab(array, prob::IBProblem{N,T}) where {N,T}
         end
     end
 
-    let ω_got = Immersa.grid_view(sol.ω[1], grid, Loc_ω, ExcludeBoundary()), ω_expect = ω
+    let ω_got = Immersa.grid_view(sol.state.ω[1], grid, Loc_ω, ExcludeBoundary()), ω_expect = ω
         @test all(eachindex(ω_got)) do i
             approx = OffsetArray(
                 KernelAbstractions.zeros(backend, Bool, size(ω_got[i])...), axes(ω_got[i])
@@ -1154,23 +1308,23 @@ function test_cnab_io(sol::CNAB)
     ω = grid_zeros(backend, grid, Loc_ω; levels=1:grid.levels)
     ψ = grid_zeros(backend, grid, Loc_ω; levels=1:grid.levels)
     u = grid_zeros(backend, grid, Loc_u; levels=1:grid.levels)
-    nonlin = map(eachindex(sol.nonlin)) do _
+    nonlin = map(eachindex(sol.state.nonlin)) do _
         grid_zeros(backend, grid, Loc_ω, ExcludeBoundary(); levels=1:grid.levels)
     end
 
     sol_i = sol.i
     sol_t = sol.t
-    nonlin_count = sol.nonlin_count
+    nonlin_count = sol.state.nonlin_count
     for level in 1:grid.levels
         for i in eachindex(ω[level])
-            _set!(ω[level][i], sol.ω[level][i])
-            _set!(ψ[level][i], sol.ψ[level][i])
+            _set!(ω[level][i], sol.state.ω[level][i])
+            _set!(ψ[level][i], sol.state.ψ[level][i])
             for k in eachindex(nonlin)
-                _set!(nonlin[k][level][i], sol.nonlin[k][level][i])
+                _set!(nonlin[k][level][i], sol.state.nonlin[k][level][i])
             end
         end
         for i in eachindex(u[level])
-            _set!(u[level][i], sol.u[level][i])
+            _set!(u[level][i], sol.state.u[level][i])
         end
     end
 
@@ -1179,17 +1333,17 @@ function test_cnab_io(sol::CNAB)
 
     sol.i = -1
     sol.t = NaN
-    sol.nonlin_count = -1
+    sol.state.nonlin_count = -1
     for level in 1:grid.levels
-        for i in eachindex(sol.ω[level])
-            fill!(sol.ω[level][i], NaN)
-            fill!(sol.ψ[level][i], NaN)
-            for k in eachindex(sol.nonlin)
-                fill!(sol.nonlin[k][level][i], NaN)
+        for i in eachindex(sol.state.ω[level])
+            fill!(sol.state.ω[level][i], NaN)
+            fill!(sol.state.ψ[level][i], NaN)
+            for k in eachindex(sol.state.nonlin)
+                fill!(sol.state.nonlin[k][level][i], NaN)
             end
         end
-        for i in eachindex(sol.u[level])
-            fill!(sol.u[level][i], NaN)
+        for i in eachindex(sol.state.u[level])
+            fill!(sol.state.u[level][i], NaN)
         end
     end
 
@@ -1198,22 +1352,22 @@ function test_cnab_io(sol::CNAB)
 
     @test sol.i == sol_i
     @test sol.t == sol_t
-    @test sol.nonlin_count == nonlin_count
+    @test sol.state.nonlin_count == nonlin_count
     @test all(
-        no_offset_view(sol.ω[level][i]) == no_offset_view(ω[level][i]) for
+        no_offset_view(sol.state.ω[level][i]) == no_offset_view(ω[level][i]) for
         level in 1:grid.levels for i in eachindex(ω[level])
     )
     @test all(
-        no_offset_view(sol.ψ[level][i]) == no_offset_view(ψ[level][i]) for
+        no_offset_view(sol.state.ψ[level][i]) == no_offset_view(ψ[level][i]) for
         level in 1:grid.levels for i in eachindex(ψ[level])
     )
     @test all(
-        no_offset_view(sol.u[level][i]) == no_offset_view(u[level][i]) for
+        no_offset_view(sol.state.u[level][i]) == no_offset_view(u[level][i]) for
         level in 1:grid.levels for i in eachindex(u[level])
     )
     @test all(
-        no_offset_view(sol.nonlin[k][level][i]) == no_offset_view(nonlin[k][level][i]) for
-        k in 1:sol.nonlin_count for level in 1:grid.levels for
+        no_offset_view(sol.state.nonlin[k][level][i]) == no_offset_view(nonlin[k][level][i]) for
+        k in 1:sol.state.nonlin_count for level in 1:grid.levels for
         i in eachindex(nonlin[k][level])
     )
 end
@@ -1235,7 +1389,7 @@ function test_cnab_io(array, ::Val{2})
         for _ in 1:50
             step!(sol)
         end
-        sol.nonlin_count = 0
+        sol.state.nonlin_count = 0
 
         # 0 nonlinear terms stored
         test_cnab_io(sol)
@@ -1267,7 +1421,7 @@ function test_cnab_io(array, ::Val{3})
         for _ in 1:50
             step!(sol)
         end
-        sol.nonlin_count = 0
+        sol.state.nonlin_count = 0
 
         # 0 nonlinear terms stored
         test_cnab_io(sol)

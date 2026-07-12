@@ -2,16 +2,25 @@
 Assembly operators for the immersed-boundary time integration.
 
 Collects the *operator-level* building blocks used by the time steppers in
-`cnab.jl` (as opposed to the per-iteration stepping logic itself). Each operator
-is dispatched on the formulation so the two schemes can share entry points:
+`cnab.jl` (as opposed to the per-iteration stepping logic itself), organized by
+formulation:
 
-  - `FastIBPM` — streamfunction-vorticity (the fast multidomain method):
+  - **`FastIBPM`** — streamfunction-vorticity (the fast multidomain method):
     `Ainv` (spectral inverse of the implicit viscous operator) and the coupling
     operators `B_inverse_rigid` / `B_rigid_mul!` / `B_deform_mul!`.
-  - `IBPM` — primitive-variable projection (Taira & Colonius): `Ainv!`
-    (truncated-Taylor `Bᴺ ≈ A⁻¹`, built from repeated Laplacian applications).
+  - **`IBPM`** — primitive-variable projection (Taira & Colonius): `Ainv!`
+    (truncated-Taylor `Bᴺ ≈ A⁻¹` from repeated Laplacian applications), the
+    coupling operators `Q_mul!` / `QT_mul!` (`Q = [G  Eᵀ]`), and the
+    modified-Poisson left-hand side `B_mul!` (`B = QᵀBᴺQ`).
 
-The shared coefficient `_A_factor = Δt/(2Re)` is formulation-independent.
+Where the two formulations expose the *same* interface they share a
+formulation-dispatched entry point (as `CNAB_Binv_Iterative` does for `B⁻¹`).
+Where they do not, they deliberately stay separate: the viscous inverse is the
+main case — `FastIBPM`'s `Ainv` *returns an operator object*, while `IBPM`'s
+`Ainv!` *applies in place* and needs haloed work fields, so there is no
+`Ainv(sol, level, ::IBPM)` method. See the `Ainv` docstring.
+
+The coefficient `_A_factor = Δt/(2Re)` is formulation-independent.
 """
 
 # ===========================================================================
@@ -29,22 +38,46 @@ _A_factor(sol::CNAB) = sol.dt / (2sol.prob.Re)
 """
     Ainv(sol::CNAB, level)
 
-Inverse of the implicit viscous operator `A = I - aΔ`. Master entry point: it
-dispatches on the problem formulation (`sol.prob.formulation`) to the
-formulation-specific implementation.
+Inverse of the implicit viscous operator `A = I - aΔ`, with `a = Δt/(2Re)`
+([`_A_factor`](@ref)). Master entry point: dispatches on the problem formulation
+(`sol.prob.formulation`) to the formulation-specific method.
+
+The two formulations invert `A` by genuinely different means, and — unlike
+`CNAB_Binv_Iterative` — they do **not** yet share this entry point:
+
+  - **`FastIBPM`** — [`Ainv(sol, level, ::FastIBPM)`](@ref) below. Returns an
+    *operator object* (an `EigenbasisTransform`) that applies `(I - aΔ)⁻¹`
+    spectrally; it is used as `Ainv(sol, level)(y, x)`.
+  - **`IBPM`** — the viscous inverse is [`Ainv!`](@ref), the truncated-Taylor
+    `Bᴺ ≈ A⁻¹` built from repeated Laplacian applications (no spectral solve).
+    It has a *different interface*: it applies `A⁻¹` **in place** and needs haloed
+    velocity fields plus scratch ([`Ainv_zeros`](@ref)), so it cannot be returned
+    from this entry point as an operator object.
+
+!!! note
+    Consequently there is **no `Ainv(sol, level, ::IBPM)` method**: calling this
+    entry point on an `IBPM` problem is a `MethodError` by design. Use [`Ainv!`](@ref)
+    directly. A wrapper making `IBPM` reachable here would have to carry the
+    haloed work fields, so it belongs with the primitive time-stepper.
 """
 Ainv(sol::CNAB, level) = Ainv(sol, level, sol.prob.formulation)
 
 """
     Ainv(sol::CNAB, level, ::FastIBPM)
 
-Streamfunction-vorticity implementation: applies `(I - aΔ)⁻¹` spectrally via the
-Laplacian eigenbasis (`EigenbasisTransform`) on the given grid `level`.
+Streamfunction-vorticity (`FastIBPM`) method of the viscous inverse: applies
+`(I - aΔ)⁻¹` spectrally via the Laplacian eigenbasis, on the given grid `level`.
+
+Returns an `EigenbasisTransform` — an *operator object*, applied as
+`Ainv(sol, level)(y, x)`. This is possible because the spectral inverse is exact
+and carries its state in the precomputed FFT plans (`sol.state.plan`). The `IBPM`
+counterpart [`Ainv!`](@ref) is instead an in-place applier; see the master
+[`Ainv`](@ref) docstring for the comparison.
 """
 function Ainv(sol::CNAB, level, ::FastIBPM)
     h = gridstep(sol.prob.grid, level)
     a = _A_factor(sol)
-    EigenbasisTransform(λ -> 1 / (1 - a * λ / h^2), sol.plan)
+    EigenbasisTransform(λ -> 1 / (1 - a * λ / h^2), sol.state.plan)
 end
 
 """
@@ -127,10 +160,10 @@ and represents how the fluid mediates the response of the rigid body to applied 
 function B_rigid_mul!(u_ib, f, sol::CNAB{N,T}) where {N,T}
     grid = sol.prob.grid
     h = grid.h
-    ω = sol.ω
+    ω = sol.state.ω
     ω¹ = grid_view(ω[1], grid, Loc_ω, ExcludeBoundary())
 
-    with_arrays_like(sol.fluid_pool, sol.u[1], sol.ψ[1]) do u¹, ψ¹
+    with_arrays_like(sol.fluid_pool, sol.state.u[1], sol.state.ψ[1]) do u¹, ψ¹
         regularize!(u¹, sol.reg, f)
         rot!(ω¹, u¹; h)
         Ainv(sol, 1)(ω¹, ω¹)
@@ -139,8 +172,8 @@ function B_rigid_mul!(u_ib, f, sol::CNAB{N,T}) where {N,T}
             fill!(ω[level][i], 0)
         end
 
-        with_arrays(sol.bndry_pool, (T, sol.ω_bndry)) do ψb
-            multidomain_poisson!(ω, (ψ¹,), (u¹,), ψb, grid, sol.plan)
+        with_arrays(sol.bndry_pool, (T, sol.state.ω_bndry)) do ψb
+            multidomain_poisson!(ω, (ψ¹,), (u¹,), ψb, grid, sol.state.plan)
         end
 
         interpolate_body!(u_ib, sol.reg, u¹)
@@ -274,6 +307,15 @@ All of `y`, `x`, `term`, `tmp` are haloed velocity fields (see `Ainv_zeros`) wit
 zero halo; `x` holds the (homogeneous-BC) input on its interior and `y` receives
 the result. `term` and `tmp` are scratch.
 
+!!! warning "Convergence constraint on Δt"
+    This is a truncated **Neumann series**, so it only approximates `A⁻¹` when the
+    spectral radius of `a L` is below one — i.e. when `a/h² ≲ 1`, the paper's
+    `νΔt/Δx² ≲ 1` condition. Beyond that the series *diverges*: the eigenvalues of
+    `Bᴺ` blow up instead of decaying, and any operator built on it (notably
+    `B = QᵀBᴺQ`) becomes severely ill-conditioned. Unlike the spectral `FastIBPM`
+    `Ainv`, which is exact for any `Δt`, this places a real upper bound on `Δt`
+    for the primitive scheme.
+
 # Arguments
 - `y`: output field (modified in-place).
 - `x`: input field.
@@ -306,4 +348,134 @@ function Ainv!(y, x, term, tmp; a, dt, n_taylor, h)
         end
     end
     y
+end
+
+"""
+    Q_mul!(q, φ, f_tilde, reg; h)
+
+Apply the coupling operator `Q = [G  Eᵀ]` to the Lagrange multiplier
+`λ = (φ, f_tilde)`, in place — matrix-free (`Q` is never assembled):
+
+    q = Q λ = G φ + Eᵀ f_tilde
+
+Following Taira & Colonius (2007) Eq. 22, the discrete pressure `φ` and the
+transformed boundary force `f_tilde` are grouped into a single Lagrange
+multiplier, so `Q` maps that pair into velocity space. `G` is the discrete
+gradient ([`gradient`](@ref)) and `Eᵀ` is the regularization (spreading) operator
+([`regularize!`](@ref)).
+
+`regularize!` zeroes its whole output field before accumulating, so calling it
+first both seeds `q` with `Eᵀ f_tilde` *and* leaves the halo at zero (as the
+homogeneous-BC operators require); `G φ` is then added over the interior-unknown
+box only. No scratch field is needed.
+
+# Arguments
+- `q`: haloed velocity field (see [`Ainv_zeros`](@ref)); overwritten with `Q λ`.
+- `φ`: cell-centered pressure (`Loc_p`).
+- `f_tilde`: transformed boundary force at the Lagrangian points.
+- `reg`: regularization/interpolation structure (`Reg`).
+- `h`: grid spacing (keyword).
+
+# Returns
+The updated field `q`.
+"""
+function Q_mul!(q, φ, f_tilde, reg; h)
+    regularize!(q, reg, f_tilde)              # q = Eᵀ f_tilde  (also zeroes the halo)
+    for i in eachindex(q)
+        qᵢ = q[i]
+        backend = get_backend(qᵢ)
+        R = CartesianIndices(_interior_range(qᵢ))
+        @loop backend (I in R) qᵢ[I] += gradient(i, φ, I; h)
+    end
+    q
+end
+
+"""
+    QT_mul!(φ, f_tilde, q, reg; h)
+
+Apply the transpose coupling operator `Qᵀ = [Gᵀ; E]` to a velocity field `q`,
+in place — matrix-free:
+
+    Qᵀ q = (Gᵀ q, E q) = (-D q, E q)
+
+On the staggered grid `G = -Dᵀ`, hence `Gᵀ = -D` (Taira & Colonius Eq. 50), so the
+first block is just the negated discrete divergence — no separate operator is
+needed. The second block is the interpolation `E` ([`interpolate_body!`](@ref)).
+
+Because the velocity unknowns carry homogeneous boundary values inside the
+projection (the physical BCs live on the right-hand side as `bc1`/`bc2`), `q`'s
+boundary faces and halo are zero, so `divergence!` over all cells returns exactly
+the interior part of `D q`.
+
+# Arguments
+- `φ`: cell-centered output (`Loc_p`); overwritten with `Gᵀ q = -D q`.
+- `f_tilde`: body-point output; overwritten with `E q`.
+- `q`: haloed velocity field.
+- `reg`: regularization/interpolation structure (`Reg`).
+- `h`: grid spacing (keyword).
+
+# Returns
+The tuple `(φ, f_tilde)`.
+"""
+function QT_mul!(φ, f_tilde, q, reg; h)
+    divergence!(φ, q; h)                      # φ = D q
+    backend = get_backend(φ)
+    @loop backend (I in CartesianIndices(φ)) φ[I] = -φ[I]   # Gᵀ = -D
+    interpolate_body!(f_tilde, reg, q)        # f_tilde = E q
+    (φ, f_tilde)
+end
+
+"""
+    B_work(backend, grid)
+
+Allocate the haloed velocity scratch fields needed by [`B_mul!`](@ref) (the
+`IBPM` modified-Poisson operator): the intermediate `Q λ`, the result `Bᴺ Q λ`,
+and the two scratch fields consumed by [`Ainv!`](@ref).
+"""
+function B_work(backend, grid::Grid)
+    (;
+        q=Ainv_zeros(backend, grid),
+        y=Ainv_zeros(backend, grid),
+        term=Ainv_zeros(backend, grid),
+        tmp=Ainv_zeros(backend, grid),
+    )
+end
+
+"""
+    B_mul!(φ_out, f_out, φ, f_tilde, reg, work, ::IBPM; h, a, dt, n_taylor)
+
+Apply the primitive-variable projection-step left-hand side `B`, in place —
+matrix-free:
+
+    B λ = Qᵀ Bᴺ Q λ,      λ = (φ, f_tilde)
+
+This is the *modified Poisson* operator of Taira & Colonius (2007) Eq. 26. It is
+the `IBPM` counterpart of the streamfunction-vorticity `B` (whose action is
+[`B_rigid_mul!`](@ref) / [`B_deform_mul!`](@ref)) — note the two act on different
+spaces: in `FastIBPM` continuity is automatic (`u = ∇×ψ`), so `B` sees only the
+body force, whereas here the Lagrange multiplier `λ` carries the pressure *and*
+the force.
+
+It is applied as the composition [`Q_mul!`](@ref) → [`Ainv!`](@ref) →
+[`QT_mul!`](@ref); nothing is assembled. Because `Bᴺ` is symmetric and
+`Qᵀ(·)Q` is a congruence, `B` is symmetric positive semi-definite — the property
+that lets the modified Poisson system be solved by conjugate gradients (its only
+null direction is the constant-pressure mode, which is pinned by the solver).
+
+# Arguments
+- `φ_out`, `f_out`: output blocks of `B λ` (cell-centered / body-point).
+- `φ`, `f_tilde`: input blocks of `λ`.
+- `reg`: regularization/interpolation structure (`Reg`).
+- `work`: scratch from [`B_work`](@ref).
+- `h`, `a`, `dt`, `n_taylor`: grid spacing, viscous coefficient `Δt/(2Re)`, time
+  step, and number of Taylor terms (keywords).
+
+# Returns
+The tuple `(φ_out, f_out)`.
+"""
+function B_mul!(φ_out, f_out, φ, f_tilde, reg, work, ::IBPM; h, a, dt, n_taylor)
+    Q_mul!(work.q, φ, f_tilde, reg; h)                        # q  = Q λ
+    Ainv!(work.y, work.q, work.term, work.tmp; a, dt, n_taylor, h)  # y = Bᴺ Q λ
+    QT_mul!(φ_out, f_out, work.y, reg; h)                     # out = Qᵀ Bᴺ Q λ
+    (φ_out, f_out)
 end

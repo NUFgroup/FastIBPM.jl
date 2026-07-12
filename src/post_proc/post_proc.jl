@@ -106,7 +106,7 @@ function save(io::IO, sol::CNAB{N,T}, ::FastIBPM) where {N,T}
     # Array (not a view or OffsetArray).
 
     let ω_tmp = map(ax -> zeros(T, length.(ax)), cell_axes(grid, Loc_ω, IncludeBoundary()))
-        for ω_lev in sol.ω, (i, ω_i) in pairs(ω_lev)
+        for ω_lev in sol.state.ω, (i, ω_i) in pairs(ω_lev)
             copy!(ω_tmp[i], no_offset_view(ω_i))
             a = view(
                 OffsetArray(ω_tmp[i], axes(ω_i)),
@@ -117,11 +117,11 @@ function save(io::IO, sol::CNAB{N,T}, ::FastIBPM) where {N,T}
         end
     end
 
-    write(io, htol(UInt32(sol.nonlin_count)))
+    write(io, htol(UInt32(sol.state.nonlin_count)))
 
     let ω_tmp = map(ax -> zeros(T, length.(ax)), cell_axes(grid, Loc_ω, ExcludeBoundary()))
-        for k in 1:sol.nonlin_count,
-            nonlin_lev in sol.nonlin[k],
+        for k in 1:sol.state.nonlin_count,
+            nonlin_lev in sol.state.nonlin[k],
             (i, nonlin_i) in pairs(nonlin_lev)
 
             copy!(ω_tmp[i], no_offset_view(nonlin_i))
@@ -163,7 +163,7 @@ function load!(io::IO, sol::CNAB{N,T}, ::FastIBPM) where {N,T}
     set_time!(sol, i)
 
     let ω_tmp = map(ax -> zeros(T, length.(ax)), cell_axes(grid, Loc_ω, IncludeBoundary()))
-        for ω_lev in sol.ω, (i, ω_i) in pairs(ω_lev)
+        for ω_lev in sol.state.ω, (i, ω_i) in pairs(ω_lev)
             a = view(
                 OffsetArray(ω_tmp[i], axes(ω_i)),
                 cell_axes(grid, Loc_ω(i), ExcludeBoundary())...,
@@ -174,11 +174,11 @@ function load!(io::IO, sol::CNAB{N,T}, ::FastIBPM) where {N,T}
         end
     end
 
-    sol.nonlin_count = ltoh(read(io, UInt32))
+    sol.state.nonlin_count = ltoh(read(io, UInt32))
 
     let ω_tmp = map(ax -> zeros(T, length.(ax)), cell_axes(grid, Loc_ω, ExcludeBoundary()))
-        for k in 1:sol.nonlin_count,
-            nonlin_lev in sol.nonlin[k],
+        for k in 1:sol.state.nonlin_count,
+            nonlin_lev in sol.state.nonlin[k],
             (i, nonlin_i) in pairs(nonlin_lev)
 
             a = ω_tmp[i]
