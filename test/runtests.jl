@@ -32,6 +32,8 @@ arrays = [Array]
             Tests.test_laplacian_bc
             Tests.test_divergence_bc
             Tests.test_Ainv
+            Tests.test_Q
+            Tests.test_B
             Tests.test_laplacian_inv
             Tests.test_multidomain_coarsen
             Tests.test_multidomain_interpolate

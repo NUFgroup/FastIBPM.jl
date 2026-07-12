@@ -94,7 +94,7 @@ function solution(file; tf, snapshot_freq)
     sol = CNAB(prob; dt, delta=Immersa.DeltaYang3S2())
 
     # Perturbation to induce vortex shedding
-    map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
+    map!(sol.state.ω[1][3], CartesianIndices(sol.state.ω[1][3])) do I
         x = coord(grid, Loc_ω(3), I)
         p = x - SA[-0.75, 0]
         r = 0.25
@@ -116,9 +116,9 @@ function solution(file; tf, snapshot_freq)
     snapshot_group = create_group(file, "snapshots")
     t_snapshot = create_dataset(snapshot_group, "t", T, (n_snapshot,))
     ω = create_dataset(
-        snapshot_group, "omega", T, (size(sol.ω[1][3])..., grid.levels, n_snapshot)
+        snapshot_group, "omega", T, (size(sol.state.ω[1][3])..., grid.levels, n_snapshot)
     )
-    write_attribute(ω, "firstindex", collect(first.(axes(sol.ω[1][3]))))
+    write_attribute(ω, "firstindex", collect(first.(axes(sol.state.ω[1][3]))))
 
     @showprogress desc = "solving" for _ in 0:round(Int, tf/dt)
         step!(sol)
@@ -131,8 +131,8 @@ function solution(file; tf, snapshot_freq)
         if sol.i in i_snapshot
             i = 1 + (sol.i - first(i_snapshot)) ÷ step(i_snapshot)
             t_snapshot[i] = sol.t
-            for level in eachindex(sol.ω)
-                ω[:, :, level, i] = OffsetArrays.no_offset_view(sol.ω[level][3])
+            for level in eachindex(sol.state.ω)
+                ω[:, :, level, i] = OffsetArrays.no_offset_view(sol.state.ω[level][3])
             end
         end
     end
