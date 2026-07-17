@@ -14,27 +14,23 @@ before CNAB; these CNAB-dependent helpers are included after.
 """
     _f_tilde_factor(sol)
 
-Compute the scaling factor used to convert between the physical body force `f`
-and the regularized force `f_tilde` used in the fluid solver.
+Scaling factor between the physical body force `f` and the transformed force
+`f_tilde` (`f = k · f_tilde`), used by `surface_force!`/`surface_force_sum` and
+`f_to_f_tilde!`. **Dispatched on the formulation**, because the two schemes'
+`f_tilde` differ by a factor of `Δt`:
 
-# Arguments
-- `sol`: CNAB solver object containing grid and time step information.
+  - `FastIBPM`: `k = -hᴺ/Δt`. Its coupling inverts `A = I - aΔ` (no `Δt`).
+  - `IBPM`: `k = -hᴺ`. Its coupling uses `Bᴺ = Δt·(I - aΔ)⁻¹`, so the same physical
+    force corresponds to an `f_tilde` that is `1/Δt` as large — the `Δt` cancels.
+    (Verified: the S-V factor over-predicts `IBPM` drag by exactly `1/Δt`.)
 
-# Returns
-- A scalar factor `k = - h^N / Δt` where:
-  - `h` is the uniform grid spacing
-  - `N` is the spatial dimension
-  - `Δt` is the time step size
-  - The negative sign follows the solver convention for force transformation
-
-# Notes
-- This factor is used in `f_to_f_tilde!` to scale forces correctly between
-  the immersed boundary and the fluid grid.
+Here `h` is the uniform grid spacing and `N` the spatial dimension.
 """
-function _f_tilde_factor(sol::CNAB{N}) where {N}
-    grid = sol.prob.grid
-    -grid.h^N / sol.dt
-end
+_f_tilde_factor(sol::CNAB) = _f_tilde_factor(sol, sol.prob.formulation)
+
+_f_tilde_factor(sol::CNAB{N}, ::FastIBPM) where {N} = -sol.prob.grid.h^N / sol.dt
+
+_f_tilde_factor(sol::CNAB{N}, ::IBPM) where {N} = -sol.prob.grid.h^N
 
 """
     f_to_f_tilde!(f, sol::CNAB; inverse=false)
