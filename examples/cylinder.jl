@@ -65,7 +65,7 @@ function solution(file; tf, snapshot_freq)
     sol = CNAB(prob; dt, delta=Immersa.DeltaYang3S2())
 
     # Perturbation to induce vortex shedding
-    map!(sol.ω[1][3], CartesianIndices(sol.ω[1][3])) do I
+    map!(sol.state.ω[1][3], CartesianIndices(sol.state.ω[1][3])) do I
         x = coord(grid, Loc_ω(3), I)
         p = x - SA[-0.75, 0]
         r = 0.25
@@ -93,13 +93,13 @@ function solution(file; tf, snapshot_freq)
     snapshot_group = create_group(file, "snapshots")
     t_snapshot = create_dataset(snapshot_group, "t", T, (n_snapshot,))
     ω = create_dataset(
-        snapshot_group, "omega", T, (size(sol.ω[1][3])..., grid.levels, n_snapshot)
+        snapshot_group, "omega", T, (size(sol.state.ω[1][3])..., grid.levels, n_snapshot)
     )
-    write_attribute(ω, "firstindex", collect(first.(axes(sol.ω[1][3]))))
+    write_attribute(ω, "firstindex", collect(first.(axes(sol.state.ω[1][3]))))
 
     # physical coordinate vectors for each level (used by fluid_time_series.jl)
-    Nx_ω, Ny_ω = size(sol.ω[1][3])
-    i0, j0 = first.(axes(sol.ω[1][3]))
+    Nx_ω, Ny_ω = size(sol.state.ω[1][3])
+    i0, j0 = first.(axes(sol.state.ω[1][3]))
     xidx = i0:(i0 + Nx_ω - 1)
     yidx = j0:(j0 + Ny_ω - 1)
     x_ds = create_dataset(snapshot_group, "x_coords", T, (Nx_ω, grid.levels))
@@ -111,10 +111,10 @@ function solution(file; tf, snapshot_freq)
     end
 
     ux = create_dataset(
-        snapshot_group, "ux", T, (size(sol.u[1][1])..., grid.levels, n_snapshot)
+        snapshot_group, "ux", T, (size(sol.state.u[1][1])..., grid.levels, n_snapshot)
     )
     uy = create_dataset(
-        snapshot_group, "uy", T, (size(sol.u[1][2])..., grid.levels, n_snapshot)
+        snapshot_group, "uy", T, (size(sol.state.u[1][2])..., grid.levels, n_snapshot)
     )
 
     @showprogress desc = "solving" for _ in 0:round(Int, tf/dt)
@@ -128,10 +128,10 @@ function solution(file; tf, snapshot_freq)
         if sol.i in i_snapshot
             i = 1 + (sol.i - first(i_snapshot)) ÷ step(i_snapshot)
             t_snapshot[i] = sol.t
-            for level in eachindex(sol.ω)
-                ω[:, :, level, i]  = OffsetArrays.no_offset_view(sol.ω[level][3])
-                ux[:, :, level, i] = OffsetArrays.no_offset_view(sol.u[level][1])
-                uy[:, :, level, i] = OffsetArrays.no_offset_view(sol.u[level][2])
+            for level in eachindex(sol.state.ω)
+                ω[:, :, level, i]  = OffsetArrays.no_offset_view(sol.state.ω[level][3])
+                ux[:, :, level, i] = OffsetArrays.no_offset_view(sol.state.u[level][1])
+                uy[:, :, level, i] = OffsetArrays.no_offset_view(sol.state.u[level][2])
             end
         end
     end
@@ -144,7 +144,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=20.0, snapshot_freq=10)
+        solution(file; tf=1.0, snapshot_freq=10)
     end
 end
 

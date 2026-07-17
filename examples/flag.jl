@@ -20,6 +20,7 @@ Re = 1000.0  # Reynolds number
 h = 0.003  # grid cell size
 dt = 6e-4  # time step
 
+
 function u(t)
     s = clamp(t / 0.1, 0, 1)
     s * (2 - s)
@@ -81,9 +82,9 @@ function solution(file; tf, snapshot_freq)
     t_snapshot = create_dataset(g_snapshot, "t", Float64, (n_snapshot,))
 
     omega = create_dataset(
-        g_snapshot, "omega", Float64, (size(sol.ω[1][3])..., grid.levels, n_snapshot)
+        g_snapshot, "omega", Float64, (size(sol.state.ω[1][3])..., grid.levels, n_snapshot)
     )
-    write_attribute(omega, "firstindex", collect(first.(axes(sol.ω[1][3]))))
+    write_attribute(omega, "firstindex", collect(first.(axes(sol.state.ω[1][3]))))
 
     x_ib = create_dataset(g_snapshot, "x_ib", Float64, (2, n_ib, n_snapshot))
 
@@ -102,8 +103,8 @@ function solution(file; tf, snapshot_freq)
 
             t_snapshot[i] = sol.t
 
-            for level in eachindex(sol.ω)
-                omega[:, :, level, i] = OffsetArrays.no_offset_view(sol.ω[level][3])
+            for level in eachindex(sol.state.ω)
+                omega[:, :, level, i] = OffsetArrays.no_offset_view(sol.state.ω[level][3])
             end
 
             x_ib[:, :, i] = reinterpret(reshape, Float64, sol.points.x)
@@ -118,7 +119,8 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do soln
-        solution(soln; tf=10.0, snapshot_freq=100)
+        # solution(soln; tf=0.5, snapshot_freq=100)
+        solution(soln; tf=5.0, snapshot_freq=100)
     end
 end
 

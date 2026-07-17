@@ -41,7 +41,7 @@ import FFTW
 # ------------------------------------------------------------------------
 # Core grid types and locations
 export GridKind, Primal, Dual
-export GridLocation, Node, Edge, Loc_u, Loc_ω
+export GridLocation, Node, Edge, Loc_u, Loc_ω, Loc_p
 export Grid, gridcorner, gridstep, coord, cell_axes, boundary_axes, grid_zeros
 export IncludeBoundary, ExcludeBoundary
 
@@ -53,9 +53,11 @@ export AbstractBody, AbstractPrescribedBody, StaticBody, MovingBody, GeometricNo
 export StructureBC
 
 # Immersed boundary problem setup and solvers
+export AbstractFormulation, FastIBPM
 export IBProblem
 export set_time!,
-    step!, zero_vorticity!, apply_vorticity!, surface_force!, surface_force_sum
+    step!, initialize_fields!, zero_vorticity!, zero_velocity!, zero_pressure!,
+    apply_vorticity!, surface_force!, surface_force_sum
 
 # Time integration and diagnostics
 export CNAB
@@ -68,33 +70,62 @@ export log_timestep
 # here to assemble the full immersed boundary solver framework.
 
 # FFT-based real-to-real transforms and Poisson solvers
-include("fft_r2r.jl")
+include("utils/fft_r2r.jl")
 using .fft_r2r
 
-include("offset_tuples.jl")
+include("utils/offset_tuples.jl")
 using .offset_tuples
 
 # General-purpose numerical and array utilities
-include("utilities.jl")
+include("utils/utilities.jl")
 using .utilities
 
-include("array_pools.jl")
+include("utils/array_pools.jl")
 using .array_pools
 
-# Problem setup and initialization routines
-include("problems.jl")
+# Eulerian (fluid) grid: staggered grid types, coordinates, index helpers, allocators
+include("fluid_domain/eulerian_grid.jl")
+
+# Lagrangian (body) grid: AbstractBody root type and BodyPoints marker container
+include("body_domain/lagrangian_grid.jl")
 
 # Models for prescribed (kinematically constrained) bodies
-include("prescribed_bodies.jl")
+include("body_domain/body_ops/prescribed_bodies.jl")
 
 # Models for deformable bodies
-include("structural_bodies.jl")
+include("body_domain/body_ops/structural_bodies.jl")
 
-# Discrete differential operators and grid mappings
-include("operators.jl")
+# Fluid-domain operators: kinematic (rot/curl/nonlinear), spectral Laplacian, and
+# multidomain multigrid Poisson solver.
+include("fluid_domain/fluid_ops/kinematic_ops.jl")
+include("fluid_domain/fluid_ops/laplacian_solver.jl")
+include("fluid_domain/fluid_ops/multi_domain.jl")
 
-#CNAB time integration scheme implementation
-include("cnab.jl")
+# Interface coupling (regularization machinery): Reg struct, delta functions, E/Eᵀ operators.
+# Included BEFORE init/problems.jl because CNAB{..., R<:Reg, ...} requires Reg defined first.
+include("interface-coupling/interface_coupling.jl")
+
+# Problem definition + CNAB integrator + initialization routines.
+include("init/problems.jl")
+
+# Formulation-specific solver state (FastIBPMState / IBPMState), its construction
+# (formulation_state) and reset (initialize_fields!). AFTER problems.jl, since the
+# reset routines dispatch on CNAB.
+include("init/state.jl")
+
+# Interface coupling (force redistribution): _f_tilde_factor, f_to_f_tilde!, redist!,
+# update_redist_weights!. These dispatch on CNAB, so they must come AFTER init/problems.jl.
+include("interface-coupling/force_redistribution.jl")
+
+# Assembly operators (formulation-dispatched): viscous inverse (Ainv / Ainv!) and
+# body-coupling operators (B_*). Included before cnab.jl, which calls them.
+include("time_stepping/assembly_ops.jl")
+
+# CNAB time-stepping: per-iteration routines (step!, prediction, coupling, projection, velocity recovery)
+include("time_stepping/cnab.jl")
+
+# Post-processing: checkpoint I/O and surface force extraction
+include("post_proc/post_proc.jl")
 
 """
     load!(filename::AbstractString, x)
