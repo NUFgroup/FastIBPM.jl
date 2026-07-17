@@ -30,7 +30,11 @@ _f_tilde_factor(sol::CNAB) = _f_tilde_factor(sol, sol.prob.formulation)
 
 _f_tilde_factor(sol::CNAB{N}, ::FastIBPM) where {N} = -sol.prob.grid.h^N / sol.dt
 
-_f_tilde_factor(sol::CNAB{N}, ::IBPM) where {N} = -sol.prob.grid.h^N
+# `gridstep` = `grid.h` for a uniform `Grid` (identical), and `Δx_min` for a
+# `StretchedGrid` — correct because the body (hence `E`/`Eᵀ`) lives in the uniform
+# core, where the delta function operates at `Δx_min` (`StretchedGrid` has no
+# scalar `h` field, so `gridstep` is the accessor here).
+_f_tilde_factor(sol::CNAB{N}, ::IBPM) where {N} = -gridstep(sol.prob.grid)^N
 
 """
     f_to_f_tilde!(f, sol::CNAB; inverse=false)
@@ -64,9 +68,7 @@ The conversion uses:
 This function returns `nothing`; the input `f` is modified in place.
 """
 function f_to_f_tilde!(f, sol::CNAB; inverse=false)
-    dt = sol.dt  # TODO: check if dt is needed here
     ds = @view sol.points.ds[eachindex(f)]
-    h = sol.prob.grid.h  # TODO: check if h is needed here
     k = _f_tilde_factor(sol)
 
     if inverse

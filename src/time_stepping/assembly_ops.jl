@@ -255,7 +255,7 @@ right-hand side (`bc1`), so the Laplacian acts with zero boundary/ghost values,
 and the (zero) halo lets the stencil read its neighbors without going out of
 bounds — including the transverse edges the plain `Loc_u` layout omits.
 """
-function Ainv_zeros(backend, grid::Grid{N,T}) where {N,T}
+function Ainv_zeros(backend, grid::AbstractGrid{N,T}) where {N,T}
     map(edge_axes(Val(N), Loc_u)) do i
         Re = cell_axes(grid, Loc_u(i), ExcludeBoundary())
         Rh = map(r -> (first(r)-1):(last(r)+1), Re)
@@ -432,7 +432,7 @@ Allocate the haloed velocity scratch fields needed by [`B_mul!`](@ref) (the
 `IBPM` modified-Poisson operator): the intermediate `Q λ`, the result `Bᴺ Q λ`,
 and the two scratch fields consumed by [`Ainv!`](@ref).
 """
-function B_work(backend, grid::Grid)
+function B_work(backend, grid::AbstractGrid)
     (;
         q=Ainv_zeros(backend, grid),
         y=Ainv_zeros(backend, grid),
@@ -477,5 +477,93 @@ function B_mul!(φ_out, f_out, φ, f_tilde, reg, work, ::IBPM; h, a, dt, n_taylo
     Q_mul!(work.q, φ, f_tilde, reg; h)                        # q  = Q λ
     Ainv!(work.y, work.q, work.term, work.tmp; a, dt, n_taylor, h)  # y = Bᴺ Q λ
     QT_mul!(φ_out, f_out, work.y, reg; h)                     # out = Qᵀ Bᴺ Q λ
+    (φ_out, f_out)
+end
+
+# ===========================================================================
+# Primitive-variable (IBPM) assembly — StretchedGrid methods
+# ===========================================================================
+#
+# Parallel to the uniform methods above, but mass-weighted so the operators stay
+# symmetric on a non-uniform grid (see the FV operators in `stretched_domain.jl`).
+# The uniform `Grid` methods are untouched; these are reached only for a
+# `StretchedGrid` (via the stretched IBPM stepping in `cnab.jl`). The key
+# difference is the mass matrix `M`: `Bᴺ = Δt Σₖ (a M⁻¹ L_sym)ᵏ M⁻¹`.
+
+# y = M⁻¹ x  (elementwise divide by the diagonal mass over the interior).
+function _mass_inv!(y, x, grid::StretchedGrid)
+    for i in eachindex(y)
+        yi, xi = y[i], x[i]
+        backend = get_backend(yi)
+        R = CartesianIndices(_interior_range(yi))
+        @loop backend (I in R) yi[I] = xi[I] / mass(grid, i, I)
+    end
+    y
+end
+
+# dest = a · L_sym · src  (symmetric FV Laplacian; no M⁻¹ — that is applied
+# separately inside `Ainv!`). Used both for `r1` and for the `Bᴺ` iteration.
+function _apply_aL!(dest, src, a, grid::StretchedGrid)
+    for i in eachindex(dest)
+        d, s = dest[i], src[i]
+        backend = get_backend(d)
+        R = CartesianIndices(_interior_range(d))
+        @loop backend (I in R) d[I] = a * laplacian(s, I, i, grid)
+    end
+    dest
+end
+
+# y = Bᴺ x = Δt Σ_{k=0}^{n_taylor-1} (a M⁻¹ L_sym)ᵏ M⁻¹ x, by Horner accumulation.
+function Ainv!(y, x, term, tmp, grid::StretchedGrid; a, dt, n_taylor)
+    _mass_inv!(y, x, grid)                       # y = z = M⁻¹ x   (k = 0 term)
+    for i in eachindex(y)
+        _set!(term[i], y[i])
+    end
+    for _ in 2:n_taylor
+        _apply_aL!(tmp, term, a, grid)           # tmp = a L_sym term
+        _mass_inv!(tmp, tmp, grid)               # tmp = a M⁻¹ L_sym term = P·term
+        for i in eachindex(y)
+            _set!(term[i], tmp[i])
+            backend = get_backend(y[i])
+            let yi = y[i], ti = term[i]
+                @loop backend (I in CartesianIndices(yi)) yi[I] += ti[I]
+            end
+        end
+    end
+    for i in eachindex(y)
+        backend = get_backend(y[i])
+        let yi = y[i]
+            @loop backend (I in CartesianIndices(yi)) yi[I] *= dt
+        end
+    end
+    y
+end
+
+# q = Q λ = G φ + Eᵀ f_tilde  (weighted gradient).
+function Q_mul!(q, φ, f_tilde, reg, grid::StretchedGrid)
+    regularize!(q, reg, f_tilde)                 # q = Eᵀ f_tilde (also zeroes the halo)
+    for i in eachindex(q)
+        qᵢ = q[i]
+        backend = get_backend(qᵢ)
+        R = CartesianIndices(_interior_range(qᵢ))
+        @loop backend (I in R) qᵢ[I] += gradient(i, φ, I, grid)
+    end
+    q
+end
+
+# Qᵀ q = (Gᵀ q, E q) = (-D q, E q)  (weighted divergence; D = -Gᵀ holds exactly).
+function QT_mul!(φ, f_tilde, q, reg, grid::StretchedGrid)
+    divergence!(φ, q, grid)
+    backend = get_backend(φ)
+    @loop backend (I in CartesianIndices(φ)) φ[I] = -φ[I]
+    interpolate_body!(f_tilde, reg, q)
+    (φ, f_tilde)
+end
+
+# B λ = Qᵀ Bᴺ Q λ.
+function B_mul!(φ_out, f_out, φ, f_tilde, reg, work, ::IBPM, grid::StretchedGrid; a, dt, n_taylor)
+    Q_mul!(work.q, φ, f_tilde, reg, grid)
+    Ainv!(work.y, work.q, work.term, work.tmp, grid; a, dt, n_taylor)
+    QT_mul!(φ_out, f_out, work.y, reg, grid)
     (φ_out, f_out)
 end

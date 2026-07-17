@@ -17,12 +17,16 @@ using Plots
 # Case A (Δx_min = 0.04, Δt = 0.005, n_b ≈ 78) at Re = 40 (steady-state validation;
 # Table 2 reference: l/d = 2.30, C_D = 1.54).
 #
-# IMPORTANT deviations from the paper (mind these when comparing numbers):
-#   * The paper uses a STRETCHED grid: Δx_min = 0.04 near the body while the domain
-#     reaches ±30 with only 150×150 cells. Our IBPM path is a SINGLE UNIFORM grid, so
-#     it cannot stretch — a uniform grid out to ±30 at h = 0.04 would need 1500×1500
-#     cells. We use a compact uniform domain at h = 0.04 instead. The nearby lateral
-#     boundaries (Dirichlet free stream) cause blockage that biases C_D upward.
+# GRID: set `use_stretched` below.
+#   * STRETCHED (default): a `StretchedGrid` with a uniform Δx_min core around the
+#     cylinder that grows geometrically out to ±30 — the paper's Case A mesh, ~150×150
+#     cells (a uniform ±30 mesh at Δx_min would need ~1500²). This places the far-field
+#     boundaries far enough away that the Dirichlet free stream no longer causes the
+#     blockage that biases C_D upward. Tune `core`/`growth`/`extent` freely below.
+#   * UNIFORM: a compact uniform `Grid`. Cheaper but the nearby lateral boundaries
+#     cause blockage that biases C_D upward — for a quick qualitative demo only.
+#
+# Other notes:
 #   * The outflow uses the paper's convective condition ∂u/∂t + u∞ ∂u/∂x = 0.
 #   * The modified-Poisson solve is an unpreconditioned CG over the whole grid, so
 #     each step is costly and reaching steady state is a long run. `tf` below is set
@@ -38,12 +42,28 @@ const OUTDIR = joinpath(SRCDIR, "figures", CASE)
 mkpath(OUTDIR)
 
 # %%
-h = 0.04  # grid cell size = Case A Δx_min
-# Compact uniform domain (see note above): a few diameters up/lateral, longer wake.
-gridlims = SA[-3.0 6.0; -3.0 3.0]
-grid = Grid(;
-    h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=1
-)
+use_stretched = true   # ← switch: paper Case-A stretched grid, or compact uniform
+
+h = 0.04  # Δx_min: the uniform-core (stretched) / uniform (compact) cell size
+
+grid = if use_stretched
+    # Paper Case A: a uniform Δx_min core around the cylinder that grows geometrically
+    # out to ±30 (~150×150 cells; a uniform ±30 mesh would need ~1500²). The body
+    # (r = 0.5) must lie inside `core`; tune these freely.
+    StretchedGrid(;
+        dx_min = h,
+        core   = SA[-1.0 1.0; -1.0 1.0],    # uniform region around the body
+        growth = 1.085,                      # geometric cell-growth ratio (→ n≈150)
+        extent = SA[-30.0 30.0; -30.0 30.0], # far-field extent
+    )
+else
+    # Compact uniform domain (blockage-biased; qualitative demo).
+    gridlims = SA[-3.0 6.0; -3.0 3.0]
+    Grid(; h, n=@.(round(Int, (gridlims[:, 2] - gridlims[:, 1]) / h)), x0=gridlims[:, 1], levels=1)
+end
+
+# Zoom window for the vorticity animation (the full ±30 domain would dwarf the body).
+plotlims = SA[-2.0 8.0; -3.0 3.0]
 
 # %%
 r = 0.5              # cylinder radius (diameter d = 1)
@@ -70,7 +90,9 @@ function vorticity!(ω, sol)
     for i in eachindex(ω)
         fill!(ω[i], 0)
     end
-    rot!(grid_view(ω, sol.prob.grid, Loc_ω, ExcludeBoundary()), sol.state.u_full; h=sol.prob.grid.h)
+    g = sol.prob.grid
+    v = grid_view(ω, g, Loc_ω, ExcludeBoundary())
+    g isa StretchedGrid ? rot!(v, sol.state.u_full, g) : rot!(v, sol.state.u_full; h=g.h)
     ω
 end
 
@@ -140,7 +162,7 @@ if isfile(soln_path)
 else
     h5open(soln_path, "cw") do file
         # Modest tf for a demo run; increase (e.g. tf = 30) to approach steady state.
-        solution(file; tf=5.0, snapshot_freq=20)
+        solution(file; tf=0.2, snapshot_freq=20)
     end
 end
 
@@ -163,7 +185,7 @@ h5open(soln_path, "r") do file
         heatmap!(
             x, y, ω[:, :, i]';
             colormap=:bwr, clim=(-ωlim, ωlim),
-            xlim=(gridlims[1, 1], gridlims[1, 2]), ylim=(gridlims[2, 1], gridlims[2, 2]),
+            xlim=(plotlims[1, 1], plotlims[1, 2]), ylim=(plotlims[2, 1], plotlims[2, 2]),
         )
         plot!(Shape(cx, cy); color=:gray, lw=0)
         title!(@sprintf("Re=%d   t = %.2f", Re, t[i]))

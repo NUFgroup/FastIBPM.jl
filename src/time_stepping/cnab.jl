@@ -495,10 +495,22 @@ end
 # `u×ω` (= `nonlinear!`), so the "pressure" φ is the total pressure p + ½|u|².
 # There is no dt on the nonlinear/mass terms of r1: the dt lives in Bᴺ = `Ainv!`.
 
-function _step!(sol::CNAB, f::IBPM)
+# The IBPM step dispatches on the grid type. The uniform `Grid` pipeline is
+# unchanged; a `StretchedGrid` runs a parallel mass-weighted pipeline (see the
+# `_*_stretched!` functions below and the operators in `stretched_domain.jl`).
+_step!(sol::CNAB, f::IBPM) = _step!(sol, f, sol.prob.grid)
+
+function _step!(sol::CNAB, f::IBPM, ::Grid)
     prediction_step!(sol, f)
     coupling_step!(sol, f)
     projection_step!(sol, f)
+    recover_velocity!(sol, f)
+end
+
+function _step!(sol::CNAB, f::IBPM, grid::StretchedGrid)
+    _prediction_stretched!(sol, grid)
+    _coupling_stretched!(sol, grid)
+    _projection_stretched!(sol, grid)
     recover_velocity!(sol, f)
 end
 
@@ -725,4 +737,124 @@ function ab_coeffs(T, n)
     else
         throw(DomainError(n, "only n=1 and n=2 are supported"))
     end
+end
+
+# ===========================================================================
+# Primitive-variable (IBPM) time step — StretchedGrid pipeline
+# ===========================================================================
+#
+# Parallel to the uniform IBPM stepping above, but on a stretched grid: the RHS
+# `r1` is mass-weighted (`(1/Δt)M qⁿ + M·Nⁿ`), the operators are the symmetric FV
+# ones, and the boundary folds / outflow use the local spacing. The uniform `Grid`
+# stepping is untouched; these run only for a `StretchedGrid`.
+
+function _prediction_stretched!(sol::CNAB{N,T}, grid::StretchedGrid) where {N,T}
+    st = sol.state
+    dt = sol.dt
+    a = _A_factor(sol)
+    ν = one(T) / sol.prob.Re
+    β = sol.β
+    backend = get_backend(st.q[1])
+    interior(i) = CartesianIndices(cell_axes(grid, Loc_u(i), ExcludeBoundary()))
+
+    _cycle!(st.nonlin)
+
+    # Vorticity ω = ∇×uⁿ for the rotational-form convection (stretched curl).
+    for i in eachindex(st.ω)
+        fill!(st.ω[i], 0)
+    end
+    rot!(grid_view(st.ω, grid, Loc_ω, ExcludeBoundary()), st.u_full, grid)
+
+    # r1 = (ν/2) L_sym qⁿ   (homogeneous; boundary part added via bc1 below)
+    r1 = st.r1
+    q = st.q
+    _apply_aL!(r1, q, ν / 2, grid)
+
+    nonlin_full = st.nonlin_count == length(st.nonlin)
+
+    # + (1/Δt) M qⁿ  and  + Σ β[end-k] M Nⁿ⁻ᵏ   (mass-weighted RHS terms)
+    for i in eachindex(r1)
+        R = interior(i)
+        r1i, qi = r1[i], q[i]
+        @loop backend (I in R) r1i[I] += mass(grid, i, I) * qi[I] / dt
+        if nonlin_full
+            for k in eachindex(st.nonlin)
+                Nk, c = st.nonlin[k][i], β[end-k]
+                @loop backend (I in R) r1i[I] += mass(grid, i, I) * c * Nk[I]
+            end
+        end
+    end
+
+    nonlinear!(st.nonlin[end], st.u_full, st.ω)
+    cnew = nonlin_full ? β[end] : one(T)
+    for i in eachindex(r1)
+        r1i, Ni = r1[i], st.nonlin[end][i]
+        @loop backend (I in interior(i)) r1i[I] += mass(grid, i, I) * cnew * Ni[I]
+    end
+
+    # bc1: viscous boundary contribution (stretched L_sym coefficients).
+    r1_interior = map(a -> @view(a[CartesianIndices(Base.IdentityUnitRange.(_interior_range(a)))]), r1)
+    viscous_bc!(r1_interior, ν, background_velocity(sol.prob.u0, sol.t), grid)
+
+    # Intermediate velocity q* = A⁻¹ r1 ≈ Bᴺ r1.
+    Ainv!(st.q_star, r1, st.work.term, st.work.tmp, grid; a, dt, n_taylor=st.n_taylor)
+
+    st.nonlin_count = min(st.nonlin_count + 1, length(st.nonlin))
+    sol
+end
+
+function _coupling_stretched!(sol::CNAB{N,T}, grid::StretchedGrid) where {N,T}
+    st = sol.state
+    body = sol.prob.body
+
+    update_body_points!(sol.points, body, sol.i, sol.t)
+    update_reg!(sol, body, eachindex(sol.points.x))
+    update_redist_weights!(sol)
+    set_velocity_boundary!(st.ub, grid, background_velocity(sol.prob.u0, sol.t))
+    _update_outflow_stretched!(sol, grid)
+
+    # RHS of the modified Poisson: Qᵀ q* - r2.
+    QT_mul!(st.rhs_φ, st.rhs_f, st.q_star, sol.reg, grid)   # (-D q*, E q*)
+    continuity_bc!(st.rhs_φ, st.ub, grid)                   # add -D∂ u_BC
+    st.rhs_f .-= sol.points.u
+
+    sol.coupler.Binv(
+        st.φ, sol.f_tilde, st.rhs_φ, st.rhs_f, sol.reg, st.work, IBPM(), grid;
+        a=_A_factor(sol), dt=sol.dt, n_taylor=st.n_taylor,
+    )
+    sol
+end
+
+function _projection_stretched!(sol::CNAB{N,T}, grid::StretchedGrid) where {N,T}
+    st = sol.state
+    dt = sol.dt
+    a = _A_factor(sol)
+    backend = get_backend(st.q[1])
+
+    Q_mul!(st.work.q, st.φ, sol.f_tilde, sol.reg, grid)
+    Ainv!(st.work.y, st.work.q, st.work.term, st.work.tmp, grid; a, dt, n_taylor=st.n_taylor)
+    for i in eachindex(st.q)
+        R = CartesianIndices(cell_axes(grid, Loc_u(i), ExcludeBoundary()))
+        qi, qsi, yi = st.q[i], st.q_star[i], st.work.y[i]
+        @loop backend (I in R) qi[I] = qsi[I] - yi[I]
+    end
+    sol
+end
+
+# Convective (Orlanski) outflow, stretched: uses the local outlet cell width.
+function _update_outflow_stretched!(sol::CNAB{N,T}, grid::StretchedGrid) where {N,T}
+    st = sol.state
+    dt = sol.dt
+    U = background_velocity(sol.prob.u0, sol.t)(zero(SVector{N,T}))[1]
+    face = st.ub[1][2, 1]        # high-x outlet
+    uf = st.u_full[1]
+    backend = get_backend(face)
+    @loop backend (I in CartesianIndices(face)) begin
+        δ = axisunit(I)
+        u_prev = uf[I]
+        u_int = uf[I-δ(1)]
+        Δx = cell_width(grid, 1, I[1] - 1)   # last interior cell width at the outlet
+        face[I] = u_prev - U * dt / Δx * (u_prev - u_int)
+    end
+    sol
 end
