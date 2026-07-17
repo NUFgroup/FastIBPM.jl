@@ -92,7 +92,7 @@ mutable struct IBPMState{Qh,Au,Aw,Ap,Vb,Ub,An,Wk}
     const n_taylor::Int
 end
 
-function IBPMState(backend, grid::Grid{N,T}, n_ib, n_step; n_taylor=3) where {N,T}
+function IBPMState(backend, grid::AbstractGrid{N,T}, n_ib, n_step; n_taylor=3) where {N,T}
     haloed() = Ainv_zeros(backend, grid)
     IBPMState(
         haloed(),
@@ -139,8 +139,18 @@ function formulation_state(backend, grid::Grid, ::FastIBPM, n_ib, n_step)
     )
 end
 
-formulation_state(backend, grid::Grid, ::IBPM, n_ib, n_step) =
+formulation_state(backend, grid::AbstractGrid, ::IBPM, n_ib, n_step) =
     IBPMState(backend, grid, n_ib, n_step)
+
+# Guard: the FastIBPM (streamfunction-vorticity) solver inverts the Laplacian
+# spectrally via FFTs on the multidomain hierarchy, which requires uniform spacing.
+# A StretchedGrid is only meaningful for the IBPM projection path.
+formulation_state(backend, grid::StretchedGrid, ::FastIBPM, n_ib, n_step) = throw(
+    ArgumentError(
+        "StretchedGrid is only supported by the IBPM formulation; FastIBPM requires " *
+        "a uniform Grid (its FFT/multidomain Poisson solver assumes uniform spacing).",
+    ),
+)
 
 # ===========================================================================
 # Initialization / reset

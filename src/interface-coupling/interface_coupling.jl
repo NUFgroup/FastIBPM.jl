@@ -211,6 +211,37 @@ function update_weights!(reg::Reg, grid::Grid{N}, xbs, ibs) where {N}
 end
 
 """
+    update_weights!(reg::Reg, grid::StretchedGrid{N}, xbs, ibs)
+
+`StretchedGrid` method of [`update_weights!`](@ref). Identical to the uniform one
+except that the stencil base index is found with [`_reg_base_index`](@ref) (the
+uniform `round((xb-x₀)/h)` map is wrong on a stretched grid) and the delta
+function is normalized by `gridstep = Δx_min`. The body sits in the uniform core,
+so the delta function itself is unchanged.
+"""
+function update_weights!(reg::Reg, grid::StretchedGrid{N}, xbs, ibs) where {N}
+    isempty(ibs) && return reg
+
+    backend = get_backend(reg.weights)
+    h = gridstep(grid)   # = Δx_min (body is in the uniform core)
+    for i in 1:N
+        @loop backend (J in CartesianIndices(ibs)) begin
+            ib = ibs[J[1]]
+            xb = xbs[ib]
+
+            reg.I[ib, i] = I = _reg_base_index(grid, Loc_u(i), xb)
+
+            for k in CartesianIndices(axes(reg.weights)[1:N])
+                ΔI = (-support(reg.delta) - 1) .+ SVector(Tuple(k))
+                xu = coord(grid, Loc_u(i), I + ΔI)
+                reg.weights[k, ib, i] = reg.delta((xb - xu) / h)
+            end
+        end
+    end
+    reg
+end
+
+"""
     interpolate_body!(ub, reg, u)
 
 Interpolate the Eulerian velocity field `u` onto the Lagrangian marker velocities

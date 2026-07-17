@@ -42,7 +42,7 @@ import FFTW
 # Core grid types and locations
 export GridKind, Primal, Dual
 export GridLocation, Node, Edge, Loc_u, Loc_ω, Loc_p
-export Grid, gridcorner, gridstep, coord, cell_axes, boundary_axes, grid_zeros
+export AbstractGrid, Grid, StretchedGrid, gridcorner, gridstep, coord, cell_axes, boundary_axes, grid_zeros
 export IncludeBoundary, ExcludeBoundary
 
 # Flow field models
@@ -98,6 +98,7 @@ include("body_domain/body_ops/structural_bodies.jl")
 # Fluid-domain operators: kinematic (rot/curl/nonlinear), spectral Laplacian, and
 # multidomain multigrid Poisson solver.
 include("fluid_domain/fluid_ops/kinematic_ops.jl")
+include("fluid_domain/fluid_ops/stretched_domain.jl")
 include("fluid_domain/fluid_ops/laplacian_solver.jl")
 include("fluid_domain/fluid_ops/multi_domain.jl")
 

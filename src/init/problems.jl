@@ -100,7 +100,7 @@ struct IMAP <: AbstractFormulation end
 
 """
     struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow,F<:AbstractFormulation}
-        grid::Grid{N,T}
+        grid::AbstractGrid{N,T}
         body::B
         Re::T
         u0::U
@@ -119,14 +119,15 @@ background flow, and the choice of numerical formulation.
 - `F<:AbstractFormulation`: The numerical formulation (default: `FastIBPM`).
 
 # Fields
-- `grid::Grid{N,T}`: The fluid grid.
+- `grid::AbstractGrid{N,T}`: The fluid grid (`Grid` for uniform, `StretchedGrid` for
+  the stretched IBPM path).
 - `body::B`: The immersed body (must be a subtype of `AbstractBody`).
 - `Re::T`: The Reynolds number.
 - `u0::U`: The background flow (must be a subtype of `IrrotationalFlow`).
 - `formulation::F`: Selects the solver formulation (e.g., `FastIBPM()`).
 """
 struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow,F<:AbstractFormulation}
-    grid::Grid{N,T}
+    grid::AbstractGrid{N,T}
     body::B
     Re::T
     u0::U
@@ -649,6 +650,58 @@ function (op::CNAB_Binv_Iterative{T})(
     # than BiCGStab at matched tolerances. The FastIBPM `B` instead routes through
     # the *approximate* `multidomain_poisson!`, leaving it only near-symmetric,
     # which is why BiCGStab is the right choice there.
+    cg!(x, Bmap, b; abstol=op.abstol, reltol=op.reltol, maxiter=op.maxiter)
+
+    vec(no_offset_view(φ)) .= @view x[1:np]
+    reinterpret(T, f_tilde) .= @view x[(np+1):n]
+    (φ, f_tilde)
+end
+
+"""
+    (op::CNAB_Binv_Iterative)(φ, f_tilde, rhs_φ, rhs_f, reg, work, ::IBPM, grid::StretchedGrid; a, dt, n_taylor)
+
+`StretchedGrid` method of the `IBPM` iterative `B⁻¹`. Identical to the uniform
+method above (pinned CG on `B = QᵀBᴺQ`), except it calls the mass-weighted
+stretched [`B_mul!`](@ref) (which is still exactly SPD once pinned — see the
+symmetry gate), so no scalar `h` is needed.
+"""
+function (op::CNAB_Binv_Iterative{T})(
+    φ, f_tilde, rhs_φ, rhs_f, reg, work, form::IBPM, grid::StretchedGrid; a, dt, n_taylor
+) where {T}
+    N = length(eltype(f_tilde))
+    np = length(no_offset_view(φ))
+    nf = N * length(f_tilde)
+    n = np + nf
+    pin = op.pin
+
+    φi, φo = similar(φ), similar(φ)
+    fi, fo = similar(f_tilde), similar(f_tilde)
+
+    Bmap = LinearMap(n; ismutating=true) do y, x
+        vec(no_offset_view(φi)) .= @view x[1:np]
+        no_offset_view(φi)[pin] = 0
+        reinterpret(T, fi) .= @view x[(np+1):n]
+
+        B_mul!(φo, fo, φi, fi, reg, work, form, grid; a, dt, n_taylor)
+
+        let yφ = @view y[1:np]
+            yφ .= vec(no_offset_view(φo))
+            yφ[pin] = x[pin]
+        end
+        @view(y[(np+1):n]) .= reinterpret(T, fo)
+        y
+    end
+
+    b = zeros(T, n)
+    b[1:np] .= vec(no_offset_view(rhs_φ))
+    b[pin] = 0
+    b[(np+1):n] .= reinterpret(T, rhs_f)
+
+    x = zeros(T, n)
+    x[1:np] .= vec(no_offset_view(φ))
+    x[pin] = 0
+    x[(np+1):n] .= reinterpret(T, f_tilde)
+
     cg!(x, Bmap, b; abstol=op.abstol, reltol=op.reltol, maxiter=op.maxiter)
 
     vec(no_offset_view(φ)) .= @view x[1:np]

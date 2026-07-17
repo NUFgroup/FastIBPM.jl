@@ -94,7 +94,30 @@ const Loc_p = Node{Dual}
 # ---------------------------------------------------------------------------
 
 """
-    struct Grid{N,T<:AbstractFloat}
+    abstract type AbstractGrid{N,T<:AbstractFloat} end
+
+Common supertype for the Eulerian Cartesian grids, parameterized by dimension `N`
+and scalar type `T`. Concrete subtypes:
+
+  - [`Grid`](@ref) — a uniform grid with a single scalar spacing `h` (used by both
+    formulations; the FastIBPM FFT/multidomain solver requires it).
+  - `StretchedGrid` — a per-axis stretched grid (uniform core + geometric growth),
+    used by the primitive-variable (`IBPM`) path only. Defined in
+    `fluid_ops/stretched_domain.jl`.
+
+The index/allocation machinery (`cell_axes`, `grid_length`, `boundary_axes`,
+`grid_zeros`, `boundary_zeros`, `grid_view`) keys off `grid.n` only, so it dispatches
+on `AbstractGrid` and is shared. The *metric* (spacing/coordinates) is queried through
+a small accessor interface — [`coord`](@ref), [`gridstep`](@ref), [`cell_width`](@ref),
+[`center_distance`](@ref) — whose uniform-`Grid` methods reduce to `h`, and whose
+stretched methods live in `stretched_domain.jl`. Operators call these accessors rather
+than a global spacing, so they stay metric-agnostic (and the uniform path keeps its
+scalar-`h` performance as a specialization).
+"""
+abstract type AbstractGrid{N,T<:AbstractFloat} end
+
+"""
+    struct Grid{N,T<:AbstractFloat} <: AbstractGrid{N,T}
         h::T
         n::SVector{N,Int}
         x0::SVector{N,T}
@@ -116,7 +139,7 @@ Creates a `Grid`. The number of cells `n` in each dimension is automatically
 rounded up to the nearest multiple of 4 to ensure compatibility with
 certain solvers (e.g., FFTs or multigrid coarsening).
 """
-@kwdef struct Grid{N,T<:AbstractFloat}
+@kwdef struct Grid{N,T<:AbstractFloat} <: AbstractGrid{N,T}
     h::T
     n::SVector{N,Int}
     x0::SVector{N,T}
@@ -157,6 +180,36 @@ Computes the grid spacing for a coarser multigrid level.
 Each level doubles the spacing: `grid.h * 2^(level - 1)`.
 """
 gridstep(grid::Grid, level::Integer) = grid.h * 2^(level - 1)
+
+# ---------------------------------------------------------------------------
+# Metric accessors (the reusability seam)
+# ---------------------------------------------------------------------------
+#
+# Operators query the local grid metric through these accessors instead of a
+# global scalar `h`. The uniform `Grid` methods below reduce to `h`, so the
+# uniform path is a zero-cost specialization; the `StretchedGrid` methods (in
+# `fluid_ops/stretched_domain.jl`) return the per-axis spacings. Keeping the
+# operators expressed in terms of these two primitives (cell width and
+# center-to-center distance) is what lets a single kernel serve both grids —
+# and keeps the door open for AMR later.
+
+"""
+    cell_width(grid, d, k)
+
+Width `Δ` of cell index `k` along axis `d` (the face-to-face spacing of the
+pressure cell). Uniform `Grid`: the constant `h`. This is the spacing that
+appears in the divergence at a cell center.
+"""
+cell_width(grid::Grid, d, k) = grid.h
+
+"""
+    center_distance(grid, d, k)
+
+Distance between the centers of cells `k-1` and `k` along axis `d`
+(`½(Δ_{k-1} + Δ_k)` in general). This is the spacing that appears in the gradient
+at a primal edge and in the transverse Laplacian coupling. Uniform `Grid`: `h`.
+"""
+center_distance(grid::Grid, d, k) = grid.h
 
 """
     coord(grid::Grid, loc, I::SVector{N,<:Integer}, args...)
@@ -319,7 +372,7 @@ end
 
 Convenience method that extracts `n` from the `Grid` object.
 """
-cell_axes(grid::Grid, args...) = cell_axes(grid.n, args...)
+cell_axes(grid::AbstractGrid, args...) = cell_axes(grid.n, args...)
 
 """
     _on_bndry(loc::Edge{Primal}, j)
@@ -342,7 +395,7 @@ _on_bndry((; i)::Edge{Dual}, j) = i ≠ j
 
 Total number of grid points for a *single* edge-centered component.
 """
-function grid_length(grid::Grid, loc::Edge, args...)
+function grid_length(grid::AbstractGrid, loc::Edge, args...)
     prod(length, cell_axes(grid, loc, args...))
 end
 
@@ -351,7 +404,7 @@ end
 
 Total number of grid points summed over *all* components of a given `Edge` type.
 """
-function grid_length(grid::Grid{N}, loc::Type{<:Edge}, args...) where {N}
+function grid_length(grid::AbstractGrid{N}, loc::Type{<:Edge}, args...) where {N}
     axs = edge_axes(Val(N), loc)
     sum(i -> grid_length(grid, loc(i), args...), axs)
 end
@@ -391,14 +444,14 @@ end
 
 Convenience method that extracts `n` from the `Grid` object.
 """
-boundary_axes(grid::Grid, args...; kw...) = boundary_axes(grid.n, args...; kw...)
+boundary_axes(grid::AbstractGrid, args...; kw...) = boundary_axes(grid.n, args...; kw...)
 
 """
     boundary_length(grid::Grid, loc::Edge)
 
 Total number of DOFs located exactly on the boundaries for a *single* component.
 """
-function boundary_length(grid::Grid, loc::Edge)
+function boundary_length(grid::AbstractGrid, loc::Edge)
     sum(dims -> prod(length, dims), boundary_axes(grid, loc))
 end
 
@@ -407,7 +460,7 @@ end
 
 Total boundary DOFs summed over *all* components of a given `Edge` type.
 """
-function boundary_length(grid::Grid{N}, loc::Type{<:Edge}) where {N}
+function boundary_length(grid::AbstractGrid{N}, loc::Type{<:Edge}) where {N}
     axs = edge_axes(Val(N), loc)
     sum(i -> boundary_length(grid, loc(i)), axs)
 end
@@ -437,7 +490,7 @@ end
 Allocate a single zero-filled `OffsetArray` for a given grid location on `backend`.
 """
 function grid_zeros(
-    backend, grid::Grid{N,T}, loc::GridLocation, bndry=IncludeBoundary()
+    backend, grid::AbstractGrid{N,T}, loc::GridLocation, bndry=IncludeBoundary()
 ) where {N,T}
     R = cell_axes(grid, loc, bndry)
     OffsetArray(KernelAbstractions.zeros(backend, T, length.(R)), R)
@@ -449,7 +502,7 @@ end
 Allocate zero-filled arrays for all components of an `Edge` type, optionally
 across multiple multigrid `levels`.
 """
-function grid_zeros(backend, grid::Grid{N}, loc::Type{<:Edge}, args...; levels=1) where {N}
+function grid_zeros(backend, grid::AbstractGrid{N}, loc::Type{<:Edge}, args...; levels=1) where {N}
     map(levels) do _
         map(edge_axes(Val(N), loc)) do i
             grid_zeros(backend, grid, loc(i), args...)
@@ -463,7 +516,7 @@ end
 Allocate a nested structure of zero-filled `OffsetArray`s for the grid boundaries,
 one per boundary face per field component.
 """
-function boundary_zeros(backend, grid::Grid{N,T}, loc) where {N,T}
+function boundary_zeros(backend, grid::AbstractGrid{N,T}, loc) where {N,T}
     dims = edge_axes(Val(N), loc)
     Rb = boundary_axes(grid, loc; dims)
     map(dims) do i
