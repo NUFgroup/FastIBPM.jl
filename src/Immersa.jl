@@ -53,6 +53,7 @@ export AbstractBody, AbstractPrescribedBody, StaticBody, MovingBody, GeometricNo
 export StructureBC
 
 # Immersed boundary problem setup and solvers
+export AbstractPreconditioner, NoPreconditioner, JacobiPreconditioner
 export AbstractFormulation, FastIBPM
 export IBProblem
 export set_time!,
@@ -105,6 +106,10 @@ include("fluid_domain/fluid_ops/multi_domain.jl")
 # Interface coupling (regularization machinery): Reg struct, delta functions, E/Eᵀ operators.
 # Included BEFORE init/problems.jl because CNAB{..., R<:Reg, ...} requires Reg defined first.
 include("interface-coupling/interface_coupling.jl")
+
+# CG preconditioners for the IBPM coupling solve. BEFORE problems.jl because
+# CNAB_Binv_Iterative carries an `AbstractPreconditioner` field.
+include("utils/preconditioner.jl")
 
 # Problem definition + CNAB integrator + initialization routines.
 include("init/problems.jl")

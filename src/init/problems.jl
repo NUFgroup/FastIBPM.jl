@@ -315,6 +315,7 @@ function CNAB(
     delta=DeltaYang3S(),
     backend=CPU(),
     coupler_args=(;),
+    precond=:auto,
 ) where {N,T}
     grid = prob.grid
     body = prob.body
@@ -346,7 +347,7 @@ function CNAB(
         state=formulation_state(backend, grid, prob.formulation, n_ib, n_step),
     )
 
-    sol = initial_sol(backend, body, args, coupler_args)
+    sol = initial_sol(backend, body, args, coupler_args; precond)
 
     sol
 end
@@ -372,13 +373,20 @@ and 3D is far worse), so **even a static body must be solved iteratively**. That
 is exactly what Taira & Colonius do, and it is why a static `IBPM` problem cannot
 reuse the `FastIBPM` precompute shortcut.
 """
-coupling_Binv(sol0::CNAB, ::AbstractStaticBody, ::FastIBPM) = B_inverse_rigid(sol0)
+# FastIBPM ignores `precond` (it uses a precomputed inverse or BiCGStab, not the
+# preconditioned CG). The kwarg is accepted only for a uniform call interface.
+coupling_Binv(sol0::CNAB, ::AbstractStaticBody, ::FastIBPM; precond=:auto) =
+    B_inverse_rigid(sol0)
 
-coupling_Binv(sol0::CNAB{N,T}, ::AbstractBody, ::FastIBPM) where {N,T} =
+coupling_Binv(sol0::CNAB{N,T}, ::AbstractBody, ::FastIBPM; precond=:auto) where {N,T} =
     CNAB_Binv_Iterative{T}()
 
-coupling_Binv(sol0::CNAB{N,T}, ::AbstractBody, ::IBPM) where {N,T} =
-    CNAB_Binv_Iterative{T}()
+function coupling_Binv(sol0::CNAB{N,T}, ::AbstractBody, ::IBPM; precond=:auto) where {N,T}
+    # `precond` selects the CG preconditioner (see `_build_precond`). The default
+    # `:auto` builds a Jacobi one on a stretched grid — whose mass matrix spans
+    # several orders of magnitude and ill-conditions the CG — and identity otherwise.
+    CNAB_Binv_Iterative{T}(; precond=_build_precond(precond, sol0))
+end
 """
     initial_sol(backend, body, sol_args, coupler_args)
 
@@ -416,12 +424,12 @@ A fully initialized `CNAB` object ready for time integration, configured accordi
 to the type of body and the specified coupling strategy.
 """
 
-function initial_sol(backend, body::AbstractStaticBody, sol_args, coupler_args)
+function initial_sol(backend, body::AbstractStaticBody, sol_args, coupler_args; precond=:auto)
     sol0 = CNAB(; sol_args..., coupler=NothingCoupler())
 
     init_body_points!(sol0.points, body)
     update_weights!(sol0.reg, sol0.prob.grid, sol0.points.x, eachindex(sol0.points.x))
-    Binv = coupling_Binv(sol0, body, sol0.prob.formulation)
+    Binv = coupling_Binv(sol0, body, sol0.prob.formulation; precond)
 
     coupler = PrescribedBodyCoupler(Binv; coupler_args...)
     sol = CNAB(; sol_args..., coupler)
@@ -434,7 +442,7 @@ end
 
 # Arturo: Add initial sol for moving bodies
 
-function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_args)
+function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_args; precond=:auto)
     # Build a temporary CNAB to get geometry-dependent weights
     sol0 = CNAB(; sol_args..., coupler=NothingCoupler())
 
@@ -446,7 +454,7 @@ function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_ar
     update_redist_weights!(sol0)
 
     # A moving body changes `B` every step, so there is nothing to precompute.
-    Binv = coupling_Binv(sol0, body, sol0.prob.formulation)
+    Binv = coupling_Binv(sol0, body, sol0.prob.formulation; precond)
 
     coupler = PrescribedBodyCoupler(Binv; coupler_args...)
     sol = CNAB(; sol_args..., coupler)
@@ -458,7 +466,7 @@ function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_ar
 end
 
 function initial_sol(
-    backend, body::GeometricNonlinearBody{N,T}, sol_args, coupler_args
+    backend, body::GeometricNonlinearBody{N,T}, sol_args, coupler_args; precond=:auto
 ) where {N,T}
     coupler = FsiCoupler(backend, body; coupler_args...)
     sol = CNAB(; sol_args..., coupler)
@@ -550,6 +558,10 @@ Base.@kwdef struct CNAB_Binv_Iterative{T}
     pin::Int = 1
     # `IBPM` only: iteration cap for the CG solve.
     maxiter::Int = 5000
+    # `IBPM` only: CG preconditioner. Defaults to identity, so the uniform-grid and
+    # FastIBPM paths are unchanged; the stretched-grid IBPM builds a Jacobi one (see
+    # `coupling_Binv`). Only the stretched `IBPM` call method consults it.
+    precond::AbstractPreconditioner = NoPreconditioner()
 end
 
 """
@@ -702,7 +714,9 @@ function (op::CNAB_Binv_Iterative{T})(
     x[pin] = 0
     x[(np+1):n] .= reinterpret(T, f_tilde)
 
-    cg!(x, Bmap, b; abstol=op.abstol, reltol=op.reltol, maxiter=op.maxiter)
+    # Jacobi-preconditioned CG (the stretched mass matrix ill-conditions `B`).
+    cg!(x, Bmap, b; abstol=op.abstol, reltol=op.reltol, maxiter=op.maxiter,
+        Pl=preconditioner_Pl(op.precond))
 
     vec(no_offset_view(φ)) .= @view x[1:np]
     reinterpret(T, f_tilde) .= @view x[(np+1):n]
