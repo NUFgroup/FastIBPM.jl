@@ -52,8 +52,8 @@ grid = if use_stretched
     # (r = 0.5) must lie inside `core`; tune these freely.
     StretchedGrid(;
         dx_min = h,
-        core   = SA[-1.0 1.0; -1.0 1.0],    # uniform region around the body
-        growth = 1.085,                      # geometric cell-growth ratio (→ n≈150)
+        core   = SA[-1.5 1.5; -1.5 1.5],     # uniform region around the body
+        growth = 1.13,                       # geometric cell-growth ratio (→ n≈150 with this core)
         extent = SA[-30.0 30.0; -30.0 30.0], # far-field extent
     )
 else
@@ -162,7 +162,7 @@ if isfile(soln_path)
 else
     h5open(soln_path, "cw") do file
         # Modest tf for a demo run; increase (e.g. tf = 30) to approach steady state.
-        solution(file; tf=0.2, snapshot_freq=20)
+        solution(file; tf=30, snapshot_freq=20)
     end
 end
 
@@ -207,3 +207,15 @@ hline!(p, [1.54]; color=:black, linestyle=:dash, label="paper Cd (Re=40)")
 savefig(p, joinpath(OUTDIR, "$(CASE)_Cd_Cl.png"))
 
 @info "final Cd" Cd_final = results.Cd[end] paper_ref = 1.54
+
+
+
+using HDF5
+h5open("examples/cylinder_PV.h5") do f
+    cd = read(f["all/Cd"]); t = read(f["all/t"])
+    last_filled = findlast(!=(0.0), cd)
+    println("array length = ", length(cd), "   last nonzero step = ", last_filled,
+            "  (t = ", t[last_filled], ")")
+    println("Cd[1:5]        = ", round.(cd[1:5], digits=3))
+    println("Cd near t=6    = ", round.(cd[last_filled-4:last_filled], digits=3))
+end
