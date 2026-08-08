@@ -253,7 +253,7 @@ h5open(soln_path, "r") do file
             #          clim=(-ωlim, ωlim))
             
 
-           zplot = copy(z)
+            zplot = copy(z)
 
             finite_mask = isfinite.(zplot)
             zplot[finite_mask] .= clamp.(zplot[finite_mask], -5, 5)

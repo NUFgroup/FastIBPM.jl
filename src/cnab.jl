@@ -162,9 +162,9 @@ ready for time integration. It performs the following main steps:
 A `CNAB` object fully initialized for coupled time-stepping with the CNAB scheme.
 """
 @kwdef mutable struct CNAB{
-    N,T,B,U,P,R<:Reg,C<:AbstractCoupler,Au,Aω,Vb,BP<:BodyPoints,A<:ArrayPool,W
+    N,T,B,U,F<:AbstractFormulation,P,R<:Reg,C<:AbstractCoupler,Au,Aω,Vb,BP<:BodyPoints,A<:ArrayPool,W
 }
-    const prob::IBProblem{N,T,B,U}
+    const prob::IBProblem{N,T,B,U,F}
     const t0::T
     i::Int
     t::T
@@ -412,14 +412,10 @@ end
 
 Advance the CNAB simulation by one time step.
 
-This is the main time integration routine that updates both the fluid and structure 
-fields according to the CNAB scheme. A single call to `step!` performs the following sequence:
-
-1. Advance the simulation time step (`set_time!`).  
-2. Predict the new fluid and body state (`prediction_step!`).  
-3. Apply fluid–structure coupling (`coupling_step!`).  
-4. Project the velocity field to enforce incompressibility (`projection_step!`).  
-5. Update the vorticity field (`apply_vorticity!`).  
+This is the public entry point for time integration. It increments the time
+counter and then delegates to `_step!`, which dispatches on
+`sol.prob.formulation` to select the correct pipeline for the chosen
+numerical formulation.
 
 # Arguments
 - `sol::CNAB` : The CNAB simulation object representing the current state.
@@ -429,13 +425,31 @@ The updated `CNAB` object after one complete time step.
 """
 function step!(sol::CNAB)
     set_time!(sol, sol.i + 1)
-
-    prediction_step!(sol)
-    coupling_step!(sol)
-    projection_step!(sol)
-    apply_vorticity!(sol)
-
+    _step!(sol, sol.prob.formulation)
     sol
+end
+
+"""
+    _step!(sol::CNAB, ::FastIBPM)
+
+Streamfunction-vorticity (nullspace) time-stepping pipeline.
+
+Executes the four-stage CNAB sequence for the ψ-ω formulation:
+
+1. `prediction_step!`  — advances vorticity with semi-implicit diffusion (CN)
+                         and explicit advection (AB2).
+2. `coupling_step!`    — solves for the body force that enforces no-slip at
+                         the immersed boundary.
+3. `projection_step!`  — corrects vorticity by spreading the body force curl
+                         back onto the grid.
+4. `apply_vorticity!`  — recovers the velocity field via the multi-domain
+                         Poisson solve (∇²ψ = −ω, then u = ∇×ψ).
+"""
+function _step!(sol::CNAB, f::FastIBPM)
+    prediction_step!(sol, f)
+    coupling_step!(sol, f)
+    projection_step!(sol, f)
+    apply_vorticity!(sol)
 end
 
 """
@@ -526,7 +540,9 @@ levels and avoids unnecessary allocations with array pools.
 # Returns
 - Updated vorticity field in-place within `sol`.
 """
-function prediction_step!(sol::CNAB)
+prediction_step!(sol::CNAB) = prediction_step!(sol, sol.prob.formulation)
+
+function prediction_step!(sol::CNAB, ::FastIBPM)
     _cycle!(sol.nonlin)
 
     for level in sol.prob.grid.levels:-1:1
@@ -614,7 +630,8 @@ correcting body force to enforce velocity constraints.
 # Returns
 - Updates `sol.f_tilde` and body-related fields in-place.
 """
-coupling_step!(sol::CNAB) = _coupling_step!(sol, sol.coupler)
+coupling_step!(sol::CNAB) = coupling_step!(sol, sol.prob.formulation)
+coupling_step!(sol::CNAB, ::FastIBPM) = _coupling_step!(sol, sol.coupler)
 
 function _coupling_step!(sol::CNAB{N,T}, coupler::PrescribedBodyCoupler) where {N,T}
     with_arrays_like(sol.body_pool, sol.f_tilde) do rhs
@@ -1135,7 +1152,9 @@ ensuring that the flow field satisfies the updated constraints after force sprea
 # Returns
 - `nothing`: The projection modifies the solver state in-place.
 """
-function projection_step!(sol::CNAB{N,T}) where {N,T}
+projection_step!(sol::CNAB) = projection_step!(sol, sol.prob.formulation)
+
+function projection_step!(sol::CNAB{N,T}, ::FastIBPM) where {N,T}
     grid = sol.prob.grid
     backend = get_backend(sol.u[1][1])
 
@@ -1340,7 +1359,9 @@ Use [`load!`](@ref) to restore the state into an existing `CNAB` object.
 - `io::IO`      : Output stream (e.g. an open file).
 - `sol::CNAB`   : Solver state to serialise.
 """
-function save(io::IO, sol::CNAB{N,T}) where {N,T}
+save(io::IO, sol::CNAB) = save(io, sol, sol.prob.formulation)
+
+function save(io::IO, sol::CNAB{N,T}, ::FastIBPM) where {N,T}
     grid = sol.prob.grid
 
     write(io, CNAB_signature)
@@ -1396,7 +1417,9 @@ time-stepping.
 - `io::IO`    : Input stream positioned at the start of a saved CNAB block.
 - `sol::CNAB` : Solver object to populate (modified in place).
 """
-function load!(io::IO, sol::CNAB{N,T}) where {N,T}
+load!(io::IO, sol::CNAB) = load!(io, sol, sol.prob.formulation)
+
+function load!(io::IO, sol::CNAB{N,T}, ::FastIBPM) where {N,T}
     grid = sol.prob.grid
 
     @assert read(io, length(CNAB_signature)) == CNAB_signature

@@ -58,7 +58,7 @@ end;
 dt = 0.005
 Re = 100.0
 u0 = UniformFlow(t -> SA[1.0, 0.0])
-prob = IBProblem(grid, body, Re, u0);
+prob = IBProblem(grid, body, Re, u0, FastIBPM());
 
 # %%
 function solution(file; tf, snapshot_freq)
@@ -145,7 +145,7 @@ if isfile(soln_path)
     @info "File already exists" soln_path
 else
     h5open(soln_path, "cw") do file
-        solution(file; tf=100.0, snapshot_freq=20)
+        solution(file; tf=10.0, snapshot_freq=20)
     end
 end
 

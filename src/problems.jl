@@ -749,35 +749,68 @@ in a small region near each point.
 abstract type AbstractBody end
 
 """
-    struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow}
+    abstract type AbstractFormulation end
+
+Abstract type for the numerical formulation used to solve the immersed
+boundary problem. Subtypes act as dispatch tags so that formulation-specific
+methods (time stepping, Poisson solves, field allocations) can be selected
+at compile time without runtime branches.
+
+Current subtypes:
+- `FastIBPM` — streamfunction-vorticity (nullspace) formulation.
+"""
+abstract type AbstractFormulation end
+
+"""
+    struct FastIBPM <: AbstractFormulation end
+
+Formulation tag for the streamfunction-vorticity (ψ-ω) IBPM.
+
+Incompressibility is satisfied everywhere by construction: the velocity is
+always computed as `u = ∇×ψ`, so `∇·u = 0` is exact to machine precision.
+This is the "nullspace" or "fast" approach from Colonius & Taira (2008).
+
+Primary state variables: vorticity `ω` and streamfunction `ψ`.
+"""
+struct FastIBPM <: AbstractFormulation end
+
+"""
+    struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow,F<:AbstractFormulation}
         grid::Grid{N,T}
         body::B
         Re::T
         u0::U
+        formulation::F
     end
 
 Defines the entire immersed boundary problem to be solved. An `IBProblem`
 instance contains all necessary components: grid, body, Reynolds number,
-and background flow.
+background flow, and the choice of numerical formulation.
 
 # Parameters
 - `N`: Dimension of the problem (2D or 3D).
 - `T`: Scalar type (e.g., `Float64`).
 - `B<:AbstractBody`: The concrete body type.
 - `U<:IrrotationalFlow`: The concrete background flow type.
+- `F<:AbstractFormulation`: The numerical formulation (default: `FastIBPM`).
 
 # Fields
 - `grid::Grid{N,T}`: The fluid grid.
 - `body::B`: The immersed body (must be a subtype of `AbstractBody`).
 - `Re::T`: The Reynolds number.
 - `u0::U`: The background flow (must be a subtype of `IrrotationalFlow`).
+- `formulation::F`: Selects the solver formulation (e.g., `FastIBPM()`).
 """
-struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow}
+struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow,F<:AbstractFormulation}
     grid::Grid{N,T}
     body::B
     Re::T
     u0::U
+    formulation::F
 end
+
+# This is to use the default formulation if the user doesn't specify one.
+IBProblem(grid, body, Re, u0) = IBProblem(grid, body, Re, u0, FastIBPM())
 
 # These are stubs. The docstrings are removed to avoid "duplicate docs" errors.
 # The real docstrings should be in the file where these are implemented.
