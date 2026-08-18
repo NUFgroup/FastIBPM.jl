@@ -36,6 +36,11 @@ _f_tilde_factor(sol::CNAB{N}, ::FastIBPM) where {N} = -sol.prob.grid.h^N / sol.d
 # scalar `h` field, so `gridstep` is the accessor here).
 _f_tilde_factor(sol::CNAB{N}, ::IBPM) where {N} = -gridstep(sol.prob.grid)^N
 
+# IMAP shares the `IBPM` factor, and not by analogy: `recover_force!` *defines*
+# `f̃` as the force that would make the IMAP solution satisfy the IBPM momentum
+# equation, so it is the same quantity in the same normalization.
+_f_tilde_factor(sol::CNAB{N}, ::IMAP) where {N} = -gridstep(sol.prob.grid)^N
+
 """
     f_to_f_tilde!(f, sol::CNAB; inverse=false)
 

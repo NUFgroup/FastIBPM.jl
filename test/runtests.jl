@@ -34,6 +34,11 @@ arrays = [Array]
             Tests.test_Ainv
             Tests.test_Q
             Tests.test_B
+            Tests.test_P
+            Tests.test_B_imap
+            Tests.test_imap_setup
+            Tests.test_cnab_imap
+            Tests.test_imap_vs_ibpm
             Tests.test_laplacian_inv
             Tests.test_multidomain_coarsen
             Tests.test_multidomain_interpolate

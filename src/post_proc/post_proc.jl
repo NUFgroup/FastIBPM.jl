@@ -57,6 +57,40 @@ function surface_force_sum(sol::CNAB)
 end
 
 """
+    noslip_residual(sol::CNAB)
+
+Largest violation of the no-slip constraint over the body points,
+
+    max_k ‖ (Rᵀu)_k - u_B,k ‖
+
+where `Rᵀ` interpolates the fluid velocity to the Lagrangian points
+([`interpolate_body!`](@ref)) and `u_B` is the prescribed body velocity (zero for
+a static body).
+
+This is the diagnostic for `IMAP`, where no-slip is not imposed by an explicit
+force but *preserved* by the constraint projection: `P` guarantees the constraint
+on what it is applied to, so this measures whether the assembled time step
+actually keeps the velocity on the manifold. Useful for `IBPM`/`FastIBPM` too,
+where it measures how well the boundary-force solve converged.
+
+Cheap — one interpolation and a reduction over `n_b` points — so it is fine to
+call every step.
+"""
+function noslip_residual(sol::CNAB{N,T}) where {N,T}
+    ub = similar(sol.f_tilde)
+    interpolate_body!(ub, sol.reg, _physical_velocity(sol))
+    maximum(norm, ub .- sol.points.u)
+end
+
+# The field holding the *physical* velocity, which the formulations name
+# differently: the primitive schemes keep it beside their interior unknowns as
+# `u_full`, while the streamfunction-vorticity scheme has only the multi-level
+# `u`, whose finest level is the physical field.
+_physical_velocity(sol::CNAB) = _physical_velocity(sol, sol.prob.formulation)
+_physical_velocity(sol::CNAB, ::FastIBPM) = sol.state.u[1]
+_physical_velocity(sol::CNAB, ::Union{IBPM,IMAP}) = sol.state.u_full
+
+"""
     const CNAB_signature
 
 A compile-time constant used as a unique identifier for the `CNAB` structure.

@@ -316,6 +316,10 @@ function CNAB(
     backend=CPU(),
     coupler_args=(;),
     precond=:auto,
+    # Extra options for the formulation's `coupling_Binv`, splatted into it. Used
+    # by `IMAP` (`symmetric`); the other formulations take
+    # none, so passing any for them is a MethodError by design.
+    formulation_args=(;),
 ) where {N,T}
     grid = prob.grid
     body = prob.body
@@ -347,7 +351,7 @@ function CNAB(
         state=formulation_state(backend, grid, prob.formulation, n_ib, n_step),
     )
 
-    sol = initial_sol(backend, body, args, coupler_args; precond)
+    sol = initial_sol(backend, body, args, coupler_args; precond, formulation_args)
 
     sol
 end
@@ -366,12 +370,19 @@ type and the formulation.
     there is nothing to precompute.
   - **`IBPM` + *any* body (static included)** → `CNAB_Binv_Iterative` (CG).
 
-The last case is the important constraint: the primitive `B = QᵀBᴺQ` acts on
+  - **`IMAP` + any body** → [`IMAPCoupling`](@ref): the precomputed manifold
+    projector `P` plus the settings for the pressure solve.
+
+The `IBPM` case is the important constraint: the primitive `B = QᵀBᴺQ` acts on
 `λ = (φ, f_tilde)`, so it is `(#cells + N·n_b)` square — not `N·n_b`. Assembling
 and factoring that densely is hopeless (a 300×300 grid alone would need ~65 GB,
 and 3D is far worse), so **even a static body must be solved iteratively**. That
 is exactly what Taira & Colonius do, and it is why a static `IBPM` problem cannot
 reuse the `FastIBPM` precompute shortcut.
+
+`IMAP` splits the difference: its body-sized operator is the Gram matrix `RᵀR`,
+which is `N·n_b` square and therefore *is* precomputable in the `FastIBPM` style,
+while the remaining pressure system is grid-sized and stays iterative.
 """
 # FastIBPM ignores `precond` (it uses a precomputed inverse or BiCGStab, not the
 # preconditioned CG). The kwarg is accepted only for a uniform call interface.
@@ -386,6 +397,70 @@ function coupling_Binv(sol0::CNAB{N,T}, ::AbstractBody, ::IBPM; precond=:auto) w
     # `:auto` builds a Jacobi one on a stretched grid — whose mass matrix spans
     # several orders of magnitude and ill-conditions the CG — and identity otherwise.
     CNAB_Binv_Iterative{T}(; precond=_build_precond(precond, sol0))
+end
+
+"""
+    IMAPCoupling(proj, solve)
+
+Body coupling for the `IMAP` formulation, stored in `PrescribedBodyCoupler.Binv`.
+
+Unlike the other formulations, IMAP's coupling is not "an operator that produces
+a boundary force" — there is no force unknown. It is instead the pair
+
+- `proj`  : the precomputed manifold projector `P = I - R(RᵀR)⁻¹Rᵀ`
+  (a `ManifoldProjection`), which enforces no-slip wherever it is applied, and
+- `solve` : the settings for the grid-sized pressure solve (a
+  [`CNAB_Binv_Iterative`](@ref)), which enforces incompressibility.
+
+They are grouped here because both are geometry-dependent and must be built
+after the regularization weights exist — the same reason `FastIBPM` builds its
+precomputed inverse in [`initial_sol`](@ref) rather than in the state.
+
+The third field, `symmetric`, selects the projected viscous series (see
+`Ainv_IMAP!`): `true` (default) uses `Σ(a P L P)ᵏ`, making the pressure operator
+SPD and the solve a CG; `false` uses the literal `Σ(a P L)ᵏ`, which is
+nonsymmetric on its own and falls back to BiCGStab(ℓ). It is stored here rather
+than passed per call so the prediction step and the pressure solve cannot
+disagree about which operator `A` is.
+
+!!! note
+    With the pressure gradient projected (always, since `B_mul!` applies `P G`),
+    the two series in fact *coincide* wherever the state is on the constraint
+    manifold — `(a P L)ᵏx = (a P L P)ᵏx` for `P x = x`. `symmetric` therefore
+    changes nothing for a static body. It is kept because a moving body breaks
+    that premise: `R` changes between steps, so `qⁿ` is on the *previous* step's
+    manifold, and only the symmetrized series is unconditionally SPD.
+"""
+struct IMAPCoupling{P,S}
+    proj::P
+    solve::S
+    symmetric::Bool
+end
+
+"""
+    coupling_Binv(sol0, body, ::IMAP; precond=:auto)
+
+`IMAP` method: build the manifold projector for the current geometry and pair it
+with the pressure-solve settings (see [`IMAPCoupling`](@ref)).
+
+The projector's Gram matrix `RᵀR` is `N·n_b` square, so for a **static body** it
+is assembled and Cholesky-factored once here and reused every step — IMAP's
+analogue of the `FastIBPM` precompute, and the reason the formulation carries no
+body-sized Krylov solve at all.
+
+`symmetric` selects the projected viscous series and therefore the Krylov method;
+see [`IMAPCoupling`](@ref). Leave it at `true` unless comparing the two.
+"""
+function coupling_Binv(
+    sol0::CNAB{N,T}, body::AbstractBody, ::IMAP;
+    precond=:auto, symmetric=true,
+) where {N,T}
+    proj = ManifoldProjection(
+        get_backend(sol0.f_tilde), sol0.prob.grid, sol0.reg, point_count(body)
+    )
+    IMAPCoupling(
+        proj, CNAB_Binv_Iterative{T}(; precond=_build_precond(precond, sol0)), symmetric
+    )
 end
 """
     initial_sol(backend, body, sol_args, coupler_args)
@@ -424,12 +499,14 @@ A fully initialized `CNAB` object ready for time integration, configured accordi
 to the type of body and the specified coupling strategy.
 """
 
-function initial_sol(backend, body::AbstractStaticBody, sol_args, coupler_args; precond=:auto)
+function initial_sol(
+    backend, body::AbstractStaticBody, sol_args, coupler_args; precond=:auto, formulation_args=(;)
+)
     sol0 = CNAB(; sol_args..., coupler=NothingCoupler())
 
     init_body_points!(sol0.points, body)
     update_weights!(sol0.reg, sol0.prob.grid, sol0.points.x, eachindex(sol0.points.x))
-    Binv = coupling_Binv(sol0, body, sol0.prob.formulation; precond)
+    Binv = coupling_Binv(sol0, body, sol0.prob.formulation; precond, formulation_args...)
 
     coupler = PrescribedBodyCoupler(Binv; coupler_args...)
     sol = CNAB(; sol_args..., coupler)
@@ -442,7 +519,9 @@ end
 
 # Arturo: Add initial sol for moving bodies
 
-function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_args; precond=:auto)
+function initial_sol(
+    backend, body::AbstractPrescribedBody, sol_args, coupler_args; precond=:auto, formulation_args=(;)
+)
     # Build a temporary CNAB to get geometry-dependent weights
     sol0 = CNAB(; sol_args..., coupler=NothingCoupler())
 
@@ -454,7 +533,7 @@ function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_ar
     update_redist_weights!(sol0)
 
     # A moving body changes `B` every step, so there is nothing to precompute.
-    Binv = coupling_Binv(sol0, body, sol0.prob.formulation; precond)
+    Binv = coupling_Binv(sol0, body, sol0.prob.formulation; precond, formulation_args...)
 
     coupler = PrescribedBodyCoupler(Binv; coupler_args...)
     sol = CNAB(; sol_args..., coupler)
@@ -466,7 +545,8 @@ function initial_sol(backend, body::AbstractPrescribedBody, sol_args, coupler_ar
 end
 
 function initial_sol(
-    backend, body::GeometricNonlinearBody{N,T}, sol_args, coupler_args; precond=:auto
+    backend, body::GeometricNonlinearBody{N,T}, sol_args, coupler_args;
+    precond=:auto, formulation_args=(;),
 ) where {N,T}
     coupler = FsiCoupler(backend, body; coupler_args...)
     sol = CNAB(; sol_args..., coupler)
@@ -667,6 +747,72 @@ function (op::CNAB_Binv_Iterative{T})(
     vec(no_offset_view(φ)) .= @view x[1:np]
     reinterpret(T, f_tilde) .= @view x[(np+1):n]
     (φ, f_tilde)
+end
+
+"""
+    (op::CNAB_Binv_Iterative)(φ, rhs_φ, proj, work, ::IMAP; h, a, dt, n_taylor, symmetric=true)
+
+Manifold-projection (`IMAP`) method: solve the pressure system
+
+    B φ = rhs_φ,    B = Gᵀ Bᴺ G
+
+in place, where `Bᴺ` is the *projected* viscous inverse (`Ainv_IMAP!`) and `B` is
+applied matrix-free by `B_mul!`.
+
+This is the `IBPM` method above with the boundary-force block removed, and the
+removal is the whole point: the unknown is `#cells` long instead of
+`#cells + N·n_b`, because IMAP never solves for a force. What remains is a
+discrete Poisson solve whose operator carries the body through `P`.
+
+`B` is singular along the constant-pressure mode (`G` annihilates a constant), so
+the pressure DOF `op.pin` is pinned exactly as in the `IBPM` method.
+
+The Krylov method follows `symmetric`:
+
+  - `true` (default) — `Bᴺ = Σ(a P L P)ᵏ` is symmetric, so `B` is SPD once pinned
+    and **CG** applies, as for `IBPM`.
+  - `false` — `Bᴺ = Σ(a P L)ᵏ` is not, so this falls back to **BiCGStab(ℓ)**, the
+    method the `FastIBPM` coupling uses for the same reason.
+"""
+function (op::CNAB_Binv_Iterative{T})(
+    φ, rhs_φ, proj, work, form::IMAP;
+    h, a, dt, n_taylor, symmetric=true,
+) where {T}
+    np = length(no_offset_view(φ))
+    pin = op.pin
+
+    φi, φo = similar(φ), similar(φ)
+
+    # y := (P B P + eₚ eₚᵀ) x — pinned so the system is nonsingular.
+    Bmap = LinearMap(np; ismutating=true) do y, x
+        vec(no_offset_view(φi)) .= x
+        no_offset_view(φi)[pin] = 0                  # project the pinned DOF out
+
+        B_mul!(φo, φi, proj, work, form; h, a, dt, n_taylor, symmetric)
+
+        y .= vec(no_offset_view(φo))
+        y[pin] = x[pin]                              # identity row/col on the pinned DOF
+        y
+    end
+
+    b = zeros(T, np)
+    b .= vec(no_offset_view(rhs_φ))
+    b[pin] = 0                                       # enforces φ[pin] = 0
+
+    # Warm start from the current pressure, as the other methods do.
+    x = zeros(T, np)
+    x .= vec(no_offset_view(φ))
+    x[pin] = 0
+
+    if symmetric
+        cg!(x, Bmap, b; abstol=op.abstol, reltol=op.reltol, maxiter=op.maxiter,
+            Pl=preconditioner_Pl(op.precond))
+    else
+        bicgstabl!(x, Bmap, b; abstol=op.abstol, reltol=op.reltol)
+    end
+
+    vec(no_offset_view(φ)) .= x
+    φ
 end
 
 """

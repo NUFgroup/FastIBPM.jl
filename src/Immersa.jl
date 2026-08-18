@@ -54,11 +54,11 @@ export StructureBC
 
 # Immersed boundary problem setup and solvers
 export AbstractPreconditioner, NoPreconditioner, JacobiPreconditioner
-export AbstractFormulation, FastIBPM
+export AbstractFormulation, FastIBPM, IBPM, IMAP
 export IBProblem
 export set_time!,
     step!, initialize_fields!, zero_vorticity!, zero_velocity!, zero_pressure!,
-    apply_vorticity!, surface_force!, surface_force_sum
+    apply_vorticity!, surface_force!, surface_force_sum, noslip_residual
 
 # Time integration and diagnostics
 export CNAB

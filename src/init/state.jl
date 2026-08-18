@@ -11,10 +11,13 @@ here, in `CNAB.state`:
     is automatic (`u = ∇×ψ`), so there is no pressure.
   - [`IBPMState`](@ref) — primitive variables. Unknowns are the velocity `q` and a
     pressure `φ`; the Lagrange multiplier is `λ = (φ, f_tilde)`.
+  - [`IMAPState`](@ref) — primitive variables with a manifold projection. Same
+    unknowns as `IBPMState` **minus the boundary force**: no-slip is enforced by
+    projecting onto the constraint manifold, so `λ = φ` alone.
 
 [`formulation_state`](@ref) builds the right one, and [`initialize_fields!`](@ref)
-resets it — each dispatched on `prob.formulation`, so neither formulation ever
-carries (or has to reason about) the other's fields.
+resets it — each dispatched on `prob.formulation`, so no formulation ever
+carries (or has to reason about) another's fields.
 """
 
 # ===========================================================================
@@ -111,6 +114,75 @@ function IBPMState(backend, grid::AbstractGrid{N,T}, n_ib, n_step; n_taylor=3) w
     )
 end
 
+"""
+    IMAPState
+
+Manifold-projection (`IMAP`) solver state, held in `CNAB.state`.
+
+IMAP keeps the primitive-variable structure of [`IBPMState`](@ref) but **drops the
+immersed-boundary force from the unknowns**: no-slip is enforced by projecting
+onto the constraint manifold `Rᵀu = 0` (see `ManifoldProjection`) instead of
+solving for an `f` that produces it. So where `IBPM` carries the Lagrange
+multiplier `λ = (φ, f_tilde)`, here `λ = φ` alone, and the field `rhs_f` — the
+force block of the modified-Poisson right-hand side — has no counterpart.
+
+Everything else is deliberately identical to `IBPMState`, **including the field
+names**: the two formulations share the same velocity layouts (haloed unknowns
+`q`/`q_star`/`r1` with a zero halo, physical `u_full` with the boundary values)
+and therefore share the reset routines [`zero_velocity!`](@ref) unchanged.
+
+Note the projector itself is *not* stored here. It is an operator, not an
+unknown, and — like the `FastIBPM` precomputed coupling inverse — it can only be
+built once the regularization weights exist, so it lives in the coupler
+(`sol.coupler.Binv.proj`, see `IMAPCoupling`).
+
+# Fields
+- `q`, `q_star`, `r1` : velocity unknowns, intermediate velocity `q*`, momentum RHS.
+- `u_full`, `ω`       : physical velocity and its vorticity (advection scratch).
+- `φ`, `rhs_φ`        : pressure, and the right-hand side of the pressure solve.
+- `ub`                : prescribed velocity on ∂D (boundary buffer).
+- `nonlin`            : Adams-Bashforth history of the momentum nonlinear term.
+- `work`              : scratch for the viscous inverse and the pressure operator.
+- `n_taylor`          : truncation order of `Bᴺ` (3 recommended).
+"""
+mutable struct IMAPState{Qh,Au,Aw,Ap,Ub,An,Wk}
+    const q::Qh
+    const q_star::Qh
+    const r1::Qh
+    const u_full::Au
+    const ω::Aw
+    const φ::Ap
+    const rhs_φ::Ap
+    const ub::Ub
+    const nonlin::Vector{An}
+    nonlin_count::Int
+    const work::Wk
+    const n_taylor::Int
+end
+
+# `n_ib` is accepted for interface symmetry with `IBPMState` (both are called
+# positionally by `formulation_state`) but is unused *here*: the only body-sized
+# object in IMAP is the projector `P = I - R(RᵀR)⁻¹Rᵀ`, and that is built in the
+# coupler — `coupling_Binv` sizes `R` from `point_count(body)`. The state itself
+# allocates no body-sized unknown, which is the whole point of the formulation.
+function IMAPState(backend, grid::AbstractGrid{N,T}, n_ib, n_step; n_taylor=3) where {N,T}
+    haloed() = Ainv_zeros(backend, grid)
+    IMAPState(
+        haloed(),
+        haloed(),
+        haloed(),
+        grid_zeros(backend, grid, Loc_u),
+        grid_zeros(backend, grid, Loc_ω),
+        grid_zeros(backend, grid, Loc_p()),
+        grid_zeros(backend, grid, Loc_p()),
+        boundary_zeros(backend, grid, Loc_u),
+        [grid_zeros(backend, grid, Loc_u, ExcludeBoundary()) for _ in 1:max(n_step - 1, 1)],
+        0,
+        B_work(backend, grid),
+        n_taylor,
+    )
+end
+
 # ===========================================================================
 # Construction
 # ===========================================================================
@@ -141,6 +213,21 @@ end
 
 formulation_state(backend, grid::AbstractGrid, ::IBPM, n_ib, n_step) =
     IBPMState(backend, grid, n_ib, n_step)
+
+formulation_state(backend, grid::Grid, ::IMAP, n_ib, n_step) =
+    IMAPState(backend, grid, n_ib, n_step)
+
+# Guard: IMAP is currently uniform-grid only. The stretched operators are
+# mass-weighted (`Bᴺ = Δt Σ (a M⁻¹ L_sym)ᵏ M⁻¹`), and the constraint projector
+# would have to be made orthogonal in the *mass* inner product to match — that is
+# a separate derivation, not a port, so it is deliberately not silently allowed.
+formulation_state(backend, grid::AbstractGrid, ::IMAP, n_ib, n_step) = throw(
+    ArgumentError(
+        "IMAP currently supports only a uniform Grid (got $(typeof(grid))). The " *
+        "mass-weighted manifold projection needed for a StretchedGrid is not " *
+        "implemented yet; use the IBPM formulation for stretched grids.",
+    ),
+)
 
 # Guard: the FastIBPM (streamfunction-vorticity) solver inverts the Laplacian
 # spectrally via FFTs on the multidomain hierarchy, which requires uniform spacing.
@@ -207,9 +294,14 @@ end
 """
     zero_velocity!(sol::CNAB)
 
-Reset the primitive-variable (`IBPM`) velocity state: clear the velocity
-unknowns, the advection scratch and the Adams-Bashforth history, then seed the
-field with the background flow.
+Reset the primitive-variable velocity state: clear the velocity unknowns, the
+advection scratch and the Adams-Bashforth history, then seed the field with the
+background flow.
+
+Shared by **both** primitive-variable formulations (`IBPM` and `IMAP`): they use
+the same velocity layouts and field names, and neither's velocity reset depends
+on how no-slip is enforced. Only the multiplier reset differs — see
+[`zero_pressure!`](@ref).
 
 Like [`zero_vorticity!`](@ref), this does *not* leave the velocity at zero — it
 leaves it at the background (free-stream) flow, which is irrotational and
@@ -276,7 +368,8 @@ different unknowns.
 
   - `FastIBPM` → [`zero_vorticity!`](@ref) (vorticity/streamfunction).
   - `IBPM`     → [`zero_velocity!`](@ref) and [`zero_pressure!`](@ref)
-    (velocity/pressure).
+    (velocity/pressure/boundary force).
+  - `IMAP`     → the same, minus the boundary-force block (no such unknown).
 """
 initialize_fields!(sol::CNAB) = initialize_fields!(sol, sol.prob.formulation)
 
@@ -285,5 +378,50 @@ initialize_fields!(sol::CNAB, ::FastIBPM) = zero_vorticity!(sol)
 function initialize_fields!(sol::CNAB, ::IBPM)
     zero_velocity!(sol)
     zero_pressure!(sol)
+    sol
+end
+
+"""
+    initialize_fields!(sol::CNAB, ::IMAP)
+
+`IMAP` reset: the primitive-variable velocity/pressure reset, **followed by a
+projection of the initial velocity onto the constraint manifold**.
+
+That last step is not optional. IMAP *preserves* the constraint rather than
+imposing it — with the pressure gradient projected, applying `Rᵀ` to the momentum
+equation gives exactly `Rᵀu^{n+1} = Rᵀuⁿ`, so whatever violation the initial
+condition carries is carried forever. The background flow that
+[`zero_velocity!`](@ref) seeds is a free stream, which violates no-slip by the
+full free-stream magnitude (`‖Rᵀu⁰‖ = U∞`), so it must be projected before the
+first step. This is the standard consistent-initial-condition requirement for a
+constrained system, and it is what `IBPM` never needs: there the boundary force
+is re-solved every step, so it repairs any violation instead of propagating it.
+
+Projecting makes `u⁰` no longer divergence-free; the first pressure solve removes
+that, exactly as it would remove the divergence of any other predictor.
+"""
+function initialize_fields!(sol::CNAB, ::IMAP)
+    zero_velocity!(sol)
+    zero_pressure!(sol, IMAP())
+
+    # `sol.coupler.Binv` carries the projector; `initial_sol` builds it before
+    # calling this, so it is available here.
+    P_mul!(sol.state.q, sol.coupler.Binv.proj)
+    recover_velocity!(sol, IMAP())      # re-sync `u_full` with the projected `q`
+
+    sol
+end
+
+"""
+    zero_pressure!(sol::CNAB, ::IMAP)
+
+Manifold-projection (`IMAP`) method of the pressure reset: identical to
+[`zero_pressure!(sol)`](@ref) but without the `rhs_f` block, which does not exist
+here — IMAP's Lagrange multiplier is `λ = φ` alone, with no boundary force.
+"""
+function zero_pressure!(sol::CNAB, ::IMAP)
+    st = sol.state
+    fill!(st.φ, 0)
+    fill!(st.rhs_φ, 0)
     sol
 end
