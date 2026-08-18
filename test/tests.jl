@@ -866,6 +866,482 @@ function test_B(array, ::Val{3})
     nothing
 end
 
+function test_P(array, grid::Grid{N}, xb) where {N}
+    backend = _backend(array)
+    T = Float64
+    nb = length(xb)
+    reg = Immersa.Reg(backend, T, Immersa.DeltaYang3S(), nb, Val(N))
+    Immersa.update_weights!(reg, grid, xb, eachindex(xb))
+    proj = Immersa.ManifoldProjection(backend, grid, reg, nb)
+
+    interior(A) = CartesianIndices(Immersa._interior_range(A))
+
+    # Haloed velocity field with a nontrivial interior and a zero halo — the
+    # layout the IMAP operators pass to `P_mul!`.
+    #
+    # NOTE: the locals below are deliberately *not* named `v`/`w`. A Julia inner
+    # function assigns to an enclosing local of the same name rather than
+    # shadowing it, so a local `v` here would silently overwrite the caller's `v`
+    # on every call and alias the two test fields together.
+    function field(c)
+        out = Immersa.Ainv_zeros(backend, grid)
+        for i in eachindex(out)
+            A = out[i]
+            @loop backend (I in interior(A)) A[I] = sin(c * sum(Tuple(I))) + c * i
+        end
+        out
+    end
+    function copyfield(x)
+        out = Immersa.Ainv_zeros(backend, grid)
+        for i in eachindex(out)
+            _set!(out[i], x[i])
+        end
+        out
+    end
+    ip(x, y) = sum(i -> sum(no_offset_view(x[i]) .* no_offset_view(y[i])), eachindex(x))
+    nrm(x) = sqrt(ip(x, x))
+    body_zeros() = KernelAbstractions.zeros(backend, SVector{N,T}, nb)
+
+    v = field(0.7)
+    Pv = copyfield(v)
+    Immersa.P_mul!(Pv, proj)
+
+    # 0. P actually does something (guards against a silently-zero correction,
+    #    which would make every other property below hold trivially).
+    @test !isapprox(no_offset_view(Pv[1]), no_offset_view(v[1]))
+
+    # 1. Idempotence P² = P — P projects *onto* the manifold, so re-projecting
+    #    an already-projected field is a no-op.
+    PPv = copyfield(Pv)
+    Immersa.P_mul!(PPv, proj)
+    @test all(i -> no_offset_view(PPv[i]) ≈ no_offset_view(Pv[i]), eachindex(Pv))
+
+    # 2. The image satisfies the constraint: Rᵀ(Pv) = E(Pv) = 0. This is the
+    #    no-slip condition IMAP enforces in place of a boundary force.
+    let Ev = body_zeros(), EPv = body_zeros()
+        Immersa.interpolate_body!(Ev, reg, v)
+        Immersa.interpolate_body!(EPv, reg, Pv)
+        @test maximum(norm, Array(EPv)) < 1e-10 * maximum(norm, Array(Ev))
+    end
+
+    # 3. P annihilates range(R): P R f = R f - R(RᵀR)⁻¹(RᵀR) f = 0 for any body
+    #    vector f. This is the check that actually exercises the Gram matrix and
+    #    its factorization — a wrong RᵀR fails here but can still pass (1) and (2).
+    let f = (array ∘ map)(k -> SVector(ntuple(i -> cos(0.9 * (k + i)), N)), 1:nb),
+        Rf = Immersa.Ainv_zeros(backend, grid)
+
+        Immersa.regularize!(Rf, reg, f)
+        scale = nrm(Rf)
+        Immersa.P_mul!(Rf, proj)
+        @test nrm(Rf) < 1e-10 * scale
+    end
+
+    # 4. Symmetry ⟨Pv, w⟩ == ⟨v, Pw⟩ — P is an *orthogonal* projector (it relies
+    #    on E and Eᵀ being exact ℓ² adjoints, as `test_Q` checks). This is what
+    #    makes the symmetrized IMAP operator Gᵀ(Σ(a·PLP)ᵏ)G symmetric.
+    let w = field(0.3), Pw = copyfield(w)
+        @test !isapprox(ip(w, w), ip(v, v))   # guard: the two fields are distinct
+        Immersa.P_mul!(Pw, proj)
+        @test ip(Pv, w) ≈ ip(v, Pw)
+    end
+
+    # 5. The halo stays zero, as the homogeneous operators require.
+    @test all(eachindex(Pv)) do i
+        A, R = Pv[i], interior(Pv[i])
+        sum(abs, no_offset_view(A)) ≈ sum(abs, @view(A[R]))
+    end
+
+    (; v, Pv, proj)
+end
+
+function test_P(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(40, 40), x0=(-1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end
+
+        test_P(array, grid, xb)
+    end
+    nothing
+end
+
+function test_P(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(40, 40, 40), x0=(-1.0, -1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 1, nb)) do t
+            s = 2π * t
+            SVector(0.5cos(s), 0.5sin(s), 0.5 * (2t - 1))
+        end
+
+        test_P(array, grid, xb)
+    end
+    nothing
+end
+
+function test_cnab_imap(array, grid::Grid{2}, xb, ds; Re=40.0, dt=0.002, nsteps=12)
+    backend = _backend(array)
+    T = Float64
+    body = StaticBody(xb, ds)
+    u0 = UniformFlow(t -> SVector{2,T}(1, 0))
+
+    mk(; kw...) = CNAB(
+        IBProblem(grid, body, T(Re), u0, IMAP()); dt, backend,
+        delta=Immersa.DeltaYang3S(), kw...,
+    )
+    resid(sol) = noslip_residual(sol)
+
+    # Divergence of the *physical* field: `q` carries zero boundary values, so its
+    # divergence is nonzero next to ∂D by exactly the boundary flux — the check
+    # has to use `u_full`, which holds the prescribed ∂D values.
+    function divnorm(sol)
+        d = grid_zeros(backend, sol.prob.grid, Loc_p())
+        Immersa.divergence!(d, sol.state.u_full; h=sol.prob.grid.h)
+        maximum(abs, no_offset_view(d))
+    end
+
+    sol = mk()
+
+    # 1. The initial condition is projected onto the manifold at construction:
+    #    IMAP preserves the constraint rather than imposing it, so a free-stream
+    #    start would violate no-slip by U∞ for the whole run.
+    @test resid(sol) < 1e-12
+
+    # 2. No-slip is *conserved*, every step and not just at the end. With the
+    #    pressure gradient projected, Rᵀu^{n+1} = Rᵀuⁿ holds exactly, so the
+    #    residual never leaves roundoff — it is not re-established by a force
+    #    solve as in IBPM. Leaving `G φ` unprojected instead makes this O(1)
+    #    after a single step, because p ~ O(1/Δt) at an impulsive start.
+    worst = 0.0
+    for _ in 1:nsteps
+        step!(sol)
+        worst = max(worst, resid(sol))
+    end
+    @test worst < 1e-10
+
+    # 3. Incompressibility, which is what the pressure solve is for.
+    @test divnorm(sol) < 1e-4
+
+    # 4. The recovered boundary force is finite, nonzero, and symmetric: a circle
+    #    in a uniform x-flow on a y-symmetric grid must produce drag but no lift.
+    f = surface_force_sum(sol)
+    @test all(isfinite, f)
+    @test f[1] > 0
+    @test abs(f[2]) < 1e-3 * abs(f[1])
+
+    # 5. The flow is actually developing — a solver that quietly froze would pass
+    #    every check above (a frozen projected free stream is on the manifold,
+    #    divergence-free, and symmetric).
+    @test maximum(abs, no_offset_view(sol.state.φ)) > 0
+
+    (; sol, f)
+end
+
+function test_cnab_imap(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(120, 80), x0=(-2.0, -2.0), levels=1),
+        nb = 62,                                   # even ⇒ body symmetric about y = 0
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end,
+        ds = fill(2π * 0.5 / nb, nb)
+
+        test_cnab_imap(array, grid, xb, ds)
+    end
+    nothing
+end
+
+# 3D is covered by the operator tests (`test_P`, `test_B_imap`, `test_imap_setup`);
+# a 3D time-integration case is too slow for the unit suite.
+test_cnab_imap(array, ::Val{3}) = nothing
+
+"""
+Cross-formulation check: IMAP and IBPM-PV must agree on the *force*, not just the
+flow, when run on an identical grid.
+
+This exists because of a bug it would have caught. `recover_force!` reconstructs
+the boundary force from the multipliers the projections discard, and an early
+version omitted the `(I - P) G φ` term — the pressure force on the body. Every
+other IMAP test still passed: the velocity field was untouched (wake length
+matched IBPM to four digits at every time), drag was positive, lift was zero by
+symmetry. Only the magnitude was wrong, by a factor of 3.6 on a cylinder at
+Re = 40. Comparing against the validated formulation is what makes that visible.
+"""
+function test_imap_vs_ibpm(array, grid::Grid{2}, xb, ds; Re=40.0, dt=0.02, nsteps=50)
+    backend = _backend(array)
+    T = Float64
+    body = StaticBody(xb, ds)
+    u0 = UniformFlow(t -> SVector{2,T}(1, 0))
+
+    Cd = map((IMAP(), IBPM())) do form
+        sol = CNAB(
+            IBProblem(grid, body, T(Re), u0, form); dt, backend,
+            delta=Immersa.DeltaYang3S(),
+        )
+        for _ in 1:nsteps
+            step!(sol)
+        end
+        f = surface_force_sum(sol)
+        @test all(isfinite, f)
+        @test abs(f[2]) < 1e-3 * abs(f[1])          # symmetric body ⇒ no lift
+        2 * f[1]
+    end
+
+    # Both formulations solve the same problem, so at matched times the drag must
+    # agree to discretization differences (the two use different approximations of
+    # A⁻¹ on the same grid, and IMAP starts from a projected initial condition).
+    # Measured at ~0.2%; the tolerance is loose enough to be robust and far tighter
+    # than any missing force contribution could survive.
+    @test abs(Cd[1] - Cd[2]) < 0.02 * abs(Cd[2])
+
+    (; Cd_imap=Cd[1], Cd_ibpm=Cd[2])
+end
+
+function test_imap_vs_ibpm(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(92, 60), x0=(-1.5, -1.5), levels=1),
+        nb = 40,
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end,
+        ds = fill(2π * 0.5 / nb, nb)
+
+        test_imap_vs_ibpm(array, grid, xb, ds)
+    end
+    nothing
+end
+
+# 2D only: this runs two full time integrations, and 3D would dominate the suite.
+test_imap_vs_ibpm(array, ::Val{3}) = nothing
+
+function test_B_imap(array, grid::Grid{N}, xb; Re=100.0, dt=0.01, n_taylor=3) where {N}
+    backend = _backend(array)
+    T = Float64
+    h = grid.h
+    a = dt / (2Re)
+    nb = length(xb)
+    reg = Immersa.Reg(backend, T, Immersa.DeltaYang3S(), nb, Val(N))
+    Immersa.update_weights!(reg, grid, xb, eachindex(xb))
+    proj = Immersa.ManifoldProjection(backend, grid, reg, nb)
+    work = Immersa.B_work(backend, grid)
+    form = Immersa.IMAP()
+
+    function applyB(p; symmetric)
+        po = grid_zeros(backend, grid, Loc_p())
+        Immersa.B_mul!(po, p, proj, work, form; h, a, dt, n_taylor, symmetric)
+        po
+    end
+    asymmetry(; kw...) =
+        let l = ip(applyB(φ; kw...), ψ), r = ip(φ, applyB(ψ; kw...))
+            abs(l - r) / max(abs(l), abs(r))
+        end
+    ip(x, y) = sum(no_offset_view(x) .* no_offset_view(y))
+    function mkφ(c)
+        p = grid_zeros(backend, grid, Loc_p())
+        @loop backend (I in CartesianIndices(p)) p[I] = sin(c * sum(Tuple(I)))
+        p
+    end
+
+    φ = mkφ(0.4)
+    ψ = mkφ(0.9)
+
+    # 1. Symmetry ⟨Bφ, ψ⟩ == ⟨φ, Bψ⟩ — the property that makes CG applicable,
+    #    exactly as for the IBPM `B`.
+    @test asymmetry(symmetric=true) < 1e-12
+
+    # 1b. The literal series Σ(a P L)ᵏ gives the *same* symmetric operator here,
+    #     and not by luck: `B` feeds it `P G φ`, which lies in range(P), where the
+    #     two series are identical ((a P L)ᵏx = (a P L P)ᵏx for P x = x — checked
+    #     directly in 4 below). Projecting the gradient is what buys this; the
+    #     bare series is asymmetric on a general input, as check 4b shows.
+    @test asymmetry(symmetric=false) < 1e-12
+
+    # 2. The constant-pressure mode is exactly in the null space (G kills a
+    #    constant), which is why one pressure DOF must be pinned.
+    let pc = grid_zeros(backend, grid, Loc_p())
+        @loop backend (I in CartesianIndices(pc)) pc[I] = 1
+        Bc = applyB(pc; symmetric=true)
+        @test ip(Bc, Bc) ≈ 0 atol = 1e-18
+    end
+
+    # 3. Positive definiteness off the null space: ⟨Bφ, φ⟩ > 0. With Bᴺ symmetric
+    #    positive definite, B = GᵀBᴺG is SPD for any non-constant φ.
+    @test ip(applyB(φ; symmetric=true), φ) > 0
+
+    # 4. The two series agree exactly on the constraint manifold: for a projected
+    #    input, (a P L P)ᵏ x == (a P L)ᵏ x. This is what makes the symmetrization
+    #    a change of operator only *off* the manifold.
+    let x = Immersa.Ainv_zeros(backend, grid),
+        y1 = Immersa.Ainv_zeros(backend, grid),
+        y2 = Immersa.Ainv_zeros(backend, grid),
+        tm = Immersa.Ainv_zeros(backend, grid),
+        tp = Immersa.Ainv_zeros(backend, grid)
+
+        for i in eachindex(x)
+            A = x[i]
+            R = CartesianIndices(Immersa._interior_range(A))
+            @loop backend (I in R) A[I] = sin(0.6 * sum(Tuple(I))) + 0.2 * i
+        end
+        # 4b. Off the manifold they differ — which is why `symmetric` exists at
+        #     all (a moving body puts qⁿ on the *previous* step's manifold).
+        Immersa.Ainv_IMAP!(y1, x, tm, tp, proj; a, dt, n_taylor, h, symmetric=true)
+        Immersa.Ainv_IMAP!(y2, x, tm, tp, proj; a, dt, n_taylor, h, symmetric=false)
+        @test !all(i -> no_offset_view(y1[i]) ≈ no_offset_view(y2[i]), eachindex(y1))
+
+        # 4. On the manifold they agree exactly.
+        Immersa.P_mul!(x, proj)
+        Immersa.Ainv_IMAP!(y1, x, tm, tp, proj; a, dt, n_taylor, h, symmetric=true)
+        Immersa.Ainv_IMAP!(y2, x, tm, tp, proj; a, dt, n_taylor, h, symmetric=false)
+        @test all(i -> no_offset_view(y1[i]) ≈ no_offset_view(y2[i]), eachindex(y1))
+    end
+
+    # 5. CG (pressure pinned) inverts B: recover a known φ from rhs = B φ.
+    Binv = Immersa.CNAB_Binv_Iterative{T}(; abstol=1e-10, reltol=0.0, pin=1)
+    φ_true = mkφ(0.6)
+    no_offset_view(φ_true)[Binv.pin] = 0
+    rhs = applyB(φ_true; symmetric=true)
+
+    φ_got = grid_zeros(backend, grid, Loc_p())
+    Binv(φ_got, rhs, proj, work, form; h, a, dt, n_taylor, symmetric=true)
+    @test no_offset_view(φ_got) ≈ no_offset_view(φ_true) rtol = 1e-6
+
+    (; φ_got, φ_true, proj)
+end
+
+function test_B_imap(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(40, 40), x0=(-1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end
+
+        test_B_imap(array, grid, xb)
+    end
+    nothing
+end
+
+function test_B_imap(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(40, 40, 40), x0=(-1.0, -1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 1, nb)) do t
+            s = 2π * t
+            SVector(0.5cos(s), 0.5sin(s), 0.5 * (2t - 1))
+        end
+
+        test_B_imap(array, grid, xb)
+    end
+    nothing
+end
+
+function test_imap_setup(array, grid::Grid{N}, xb, ds) where {N}
+    backend = _backend(array)
+    T = Float64
+    nb = length(xb)
+    body = StaticBody(xb, ds)
+    u0 = UniformFlow(t -> SVector{N,T}(1, ntuple(_ -> 0, N - 1)...))
+    prob = IBProblem(grid, body, T(100), u0, IMAP())
+    sol = CNAB(prob; dt=T(0.002), backend, delta=Immersa.DeltaYang3S())
+    st = sol.state
+
+    # 1. The unknowns are velocity + pressure only: no boundary-force block.
+    #    `rhs_f` is the IBPM force block of the modified-Poisson RHS, and its
+    #    absence is the structural difference between the two formulations.
+    @test st isa Immersa.IMAPState
+    @test !hasproperty(st, :rhs_f)
+    @test hasproperty(sol.state, :rhs_φ)
+
+    # 2. The projector lives in the coupler (an operator, not an unknown) and is
+    #    built against the initialized geometry.
+    @test sol.coupler isa Immersa.PrescribedBodyCoupler
+    @test sol.coupler.Binv isa Immersa.IMAPCoupling
+    @test sol.coupler.Binv.proj isa Immersa.ManifoldProjection
+
+    # 3. Initialization: the free stream *projected onto the constraint manifold*,
+    #    zero pressure, no history. The projection is required — IMAP conserves
+    #    the constraint instead of imposing it, so an unprojected free-stream
+    #    start would violate no-slip by U∞ for the whole run.
+    @test noslip_residual(sol) < 1e-12
+    let far = first(CartesianIndices(cell_axes(grid, Loc_u(1), Immersa.ExcludeBoundary())))
+        @test st.u_full[1][far] ≈ 1                    # untouched far from the body
+    end
+    @test !all(no_offset_view(st.u_full[1]) .== 1)     # but changed near it
+    @test all(no_offset_view(st.φ) .== 0)
+    @test all(no_offset_view(st.rhs_φ) .== 0)
+    @test st.nonlin_count == 0
+
+    # 4. The interior unknowns `q` are seeded from the physical field and the
+    #    halo is left at zero, as the homogeneous operators require.
+    for i in 1:N
+        R = CartesianIndices(cell_axes(grid, Loc_u(i), Immersa.ExcludeBoundary()))
+        @test all(st.q[i][I] == st.u_full[i][I] for I in R)
+        @test sum(abs, no_offset_view(st.q[i])) ≈ sum(abs, @view(st.q[i][R]))
+    end
+
+    # 5. The projector in the coupler is wired to the right geometry: an
+    #    unprojected free stream violates no-slip by U∞, and one application of
+    #    `P` removes it. (This is what `initialize_fields!` does above; here it is
+    #    checked directly, starting from the raw free stream.)
+    let q = Immersa.Ainv_zeros(backend, grid), ub = KernelAbstractions.zeros(backend, SVector{N,T}, nb)
+        for i in eachindex(q)
+            R = CartesianIndices(cell_axes(grid, Loc_u(i), Immersa.ExcludeBoundary()))
+            @loop backend (I in R) q[i][I] = i == 1 ? 1 : 0
+        end
+        Immersa.interpolate_body!(ub, sol.reg, q)
+        before = maximum(norm, Array(ub))
+        @test before > 0.5                      # free stream: no-slip badly violated
+        Immersa.P_mul!(q, sol.coupler.Binv.proj)
+        Immersa.interpolate_body!(ub, sol.reg, q)
+        @test maximum(norm, Array(ub)) < 1e-10 * before
+    end
+
+    # 6. Reinitializing is idempotent (no leftover history or pressure).
+    initialize_fields!(sol)
+    @test st.nonlin_count == 0
+    @test all(no_offset_view(st.φ) .== 0)
+
+    sol
+end
+
+function test_imap_setup(array, ::Val{2})
+    let grid = Grid(; h=0.05, n=(40, 40), x0=(-1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 2π, nb + 1)[1:(end-1)]) do t
+            SVector(0.5cos(t), 0.5sin(t))
+        end,
+        ds = fill(2π * 0.5 / nb, nb)
+
+        test_imap_setup(array, grid, xb, ds)
+
+        # A StretchedGrid must be refused outright rather than silently running
+        # with a projection that is not orthogonal in the mass inner product.
+        let sgrid = StretchedGrid(;
+                dx_min=0.05,
+                core=[fill(-0.8, 2) fill(0.8, 2)],
+                growth=1.2,
+                extent=[fill(-3.0, 2) fill(3.0, 2)],
+            ),
+            sprob = IBProblem(
+                sgrid, StaticBody(xb, ds), 100.0, UniformFlow(t -> SVector(1.0, 0.0)), IMAP()
+            )
+
+            @test_throws ArgumentError CNAB(sprob; dt=0.002)
+        end
+    end
+    nothing
+end
+
+function test_imap_setup(array, ::Val{3})
+    let grid = Grid(; h=0.05, n=(40, 40, 40), x0=(-1.0, -1.0, -1.0), levels=1),
+        nb = 20,
+        xb = (array ∘ map)(range(0, 1, nb)) do t
+            s = 2π * t
+            SVector(0.5cos(s), 0.5sin(s), 0.5 * (2t - 1))
+        end,
+        ds = fill(0.16, nb)
+
+        test_imap_setup(array, grid, xb, ds)
+    end
+    nothing
+end
+
 function test_laplacian_inv(array, grid::Grid{N}, ψ_true::LinearFunc{3,T}) where {N,T}
     @assert _div(ψ_true) < eps(T)
 
