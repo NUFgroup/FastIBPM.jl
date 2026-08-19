@@ -423,13 +423,39 @@ nonsymmetric on its own and falls back to BiCGStab(ℓ). It is stored here rathe
 than passed per call so the prediction step and the pressure solve cannot
 disagree about which operator `A` is.
 
-!!! note
+!!! note "Why the default is `true` even though the operators are equal"
     With the pressure gradient projected (always, since `B_mul!` applies `P G`),
-    the two series in fact *coincide* wherever the state is on the constraint
-    manifold — `(a P L)ᵏx = (a P L P)ᵏx` for `P x = x`. `symmetric` therefore
-    changes nothing for a static body. It is kept because a moving body breaks
-    that premise: `R` changes between steps, so `qⁿ` is on the *previous* step's
-    manifold, and only the symmetrized series is unconditionally SPD.
+    the two series *coincide mathematically*: `(a P L)ᵏx = (a P L P)ᵏx` whenever
+    `P x = x`, and `B = GᵀBᴺPG` is symmetric either way, since the `P G` on the
+    right and `Gᵀ` on the left already supply the projections. Measured, the two
+    give the same result to `1e-16`.
+
+    They are *not* equal in finite precision, and the difference is worth about
+    25% of the run time. Re-projecting the series input makes every matvec land
+    in exactly the same subspace, so CG sees a consistent operator; without it,
+    each matvec carries a small iterate-dependent residue at roundoff level.
+    Cold-started, this is irrelevant (451 matvecs either way — the residual has
+    to fall from `‖b‖` to the tolerance, a range in which `1e-16` noise does not
+    matter). Warm-started from the previous step's pressure, which is what
+    production runs do, the residual to be reduced is already small and the noise
+    is comparatively much closer to it: 415 matvecs with the extra projection
+    against 665 without, from an identical state and warm start. The extra `P`
+    costs ~9% per matvec and saves ~35% of them.
+
+    A moving body is a genuinely open case rather than a second argument for
+    symmetrizing. `R` changes between steps, so `qⁿ` lies on the *previous*
+    step's manifold and `P x = x` fails; the two series are then different
+    operators — the literal one is the faithful Neumann series for
+    `A = (1/Δt)I - ½PL` as defined, the symmetrized one inverts
+    `(1/Δt)I - ½PLP` — and which is wanted is a formulation question, not a
+    solver one. Note the numerical argument above does not transfer either, since
+    the extra projection is no longer a mathematical no-op there.
+
+    What does *not* change is the solve: `B = GᵀBᴺPG` is symmetric positive
+    definite with either series, moving body or not, because the `PG` on the
+    right and `Gᵀ` on the left supply the projections regardless of the state
+    (`Bᵀ = Gᵀ[Σ(aPL)ᵏP]G = B`, an operator identity with no premise on the
+    input). `Bᴺ`'s own symmetry is never what makes CG applicable.
 """
 struct IMAPCoupling{P,S}
     proj::P

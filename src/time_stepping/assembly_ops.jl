@@ -746,25 +746,34 @@ accumulation, and the `a/h² ≲ 1` convergence bound on `Δt` — applies uncha
 # The `symmetric` keyword
 
 `P L` is not symmetric (`P` and `L` each are, but they do not commute), so the
-literal series makes the pressure operator `B = Gᵀ Bᴺ G` nonsymmetric and rules
-out CG. Setting `symmetric=true` (the default) uses the **symmetrized** series
+literal series `Σ(a P L)ᵏ` is not a symmetric operator on its own. Setting
+`symmetric=true` (the default) uses the **symmetrized** series
 
     Bᴺ = Δt Σ_{k=0}^{n_taylor-1} (a P L P)ᵏ,
 
-whose every term is symmetric, making `B` symmetric positive definite and CG
-applicable — see the `IMAP` method of [`CNAB_Binv_Iterative`](@ref).
+whose every term is symmetric.
 
-This is not an approximation on the constraint manifold. Since `P² = P`,
+The flag is *not*, however, what makes CG applicable. The pressure operator
+`B = Gᵀ Bᴺ P G` is symmetric either way, because the `P G` on the right and the
+`Gᵀ` on the left already supply the projections — see the `IMAP` method of
+[`CNAB_Binv_Iterative`](@ref). Nor is the symmetrization an approximation on the
+constraint manifold: since `P² = P`, expanding the product and collapsing each
+doubled projector gives
 
-    (a P L P)ᵏ x = (a P L)ᵏ (P x)   for k ≥ 1,
+    (a P L P)ᵏ = (a P L)ᵏ P     for k ≥ 1,
 
-so the two variants differ *only* in whether the series input is projected, and
-they coincide exactly whenever `P x = x` — which is the case for the prediction
-step, where `x = r1` is manifold-valued up to the constraint violation carried by
-`uⁿ`. They differ only for off-manifold inputs such as `G φ` in the pressure
-solve, where `Bᴺ` is an approximate inverse defining the fractional step anyway.
-That identity is also why the flag costs one extra `P` per apply rather than two
-per Taylor term: it is implemented by projecting the running term once, up front.
+so every interior projector is redundant and the two variants differ *only* in
+whether the series input is projected — coinciding exactly whenever `P x = x`,
+which holds for both call sites (the prediction's `r1` and the pressure solve's
+`P G φ`). That identity is also why the flag costs one extra `P` per apply rather
+than one per Taylor term: it is implemented by projecting the running term once,
+up front.
+
+What the flag buys is *numerical*, and it is worth about 25% of the run time:
+re-projecting makes every matvec land in exactly the same subspace, so the
+warm-started CG sees a consistent operator instead of one perturbed at roundoff
+level from iterate to iterate. See the `IMAPCoupling` docstring for the
+measurements, and for the moving-body caveat.
 
 # Arguments
 - `y`: output field (modified in-place).

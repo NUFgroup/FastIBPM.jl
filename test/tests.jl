@@ -1180,8 +1180,11 @@ function test_B_imap(array, grid::Grid{N}, xb; Re=100.0, dt=0.01, n_taylor=3) wh
             R = CartesianIndices(Immersa._interior_range(A))
             @loop backend (I in R) A[I] = sin(0.6 * sum(Tuple(I))) + 0.2 * i
         end
-        # 4b. Off the manifold they differ — which is why `symmetric` exists at
-        #     all (a moving body puts qⁿ on the *previous* step's manifold).
+        # 4b. Off the manifold they are genuinely different operators. This is
+        #     the case a moving body will land in (qⁿ on the *previous* step's
+        #     manifold), where which series is wanted becomes a formulation
+        #     question — it does not affect the symmetry of `B`, which the `P G`
+        #     inside `B_mul!` supplies either way.
         Immersa.Ainv_IMAP!(y1, x, tm, tp, proj; a, dt, n_taylor, h, symmetric=true)
         Immersa.Ainv_IMAP!(y2, x, tm, tp, proj; a, dt, n_taylor, h, symmetric=false)
         @test !all(i -> no_offset_view(y1[i]) ≈ no_offset_view(y2[i]), eachindex(y1))
