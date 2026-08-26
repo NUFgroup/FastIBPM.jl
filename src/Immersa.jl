@@ -123,12 +123,24 @@ include("init/state.jl")
 # update_redist_weights!. These dispatch on CNAB, so they must come AFTER init/problems.jl.
 include("interface-coupling/force_redistribution.jl")
 
-# Assembly operators (formulation-dispatched): viscous inverse (Ainv / Ainv!) and
-# body-coupling operators (B_*). Included before cnab.jl, which calls them.
-include("time_stepping/assembly_ops.jl")
+# Assembly operators, split by formulation: the viscous inverse, the coupling
+# operators and the projection-step left-hand sides. `ops_common.jl` holds what
+# more than one formulation uses (`_A_factor`, the `Ainv` entry point, and the
+# haloed-field machinery the primitive schemes share). Included before the
+# steppers, which call them.
+include("time_stepping/ops_common.jl")
+include("time_stepping/ops_fastibpm.jl")
+include("time_stepping/ops_ibpm.jl")
+include("time_stepping/ops_imap.jl")
 
-# CNAB time-stepping: per-iteration routines (step!, prediction, coupling, projection, velocity recovery)
-include("time_stepping/cnab.jl")
+# CNAB time-stepping, split by formulation: per-iteration routines (prediction,
+# coupling/pressure, projection/correction, force and velocity recovery).
+# `cnab_common.jl` holds the clock, `step!`, and the generic stage entry points
+# that dispatch on `sol.prob.formulation`.
+include("time_stepping/cnab_common.jl")
+include("time_stepping/cnab_fastibpm.jl")
+include("time_stepping/cnab_ibpm.jl")
+include("time_stepping/cnab_imap.jl")
 
 # Post-processing: checkpoint I/O and surface force extraction
 include("post_proc/post_proc.jl")
