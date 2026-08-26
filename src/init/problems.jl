@@ -96,7 +96,6 @@ by designing computationally cheap surface-local projection operations.
 """
 struct IMAP <: AbstractFormulation end
 
-# TODO: add flags for the CNAB using IBPM and IMAP in src/time_stepping/cnab.jl, and add the corresponding CNAB methods for these formulations.
 
 """
     struct IBProblem{N,T,B<:AbstractBody,U<:IrrotationalFlow,F<:AbstractFormulation}
@@ -145,7 +144,7 @@ function surface_force_sum end
 
 # ---------------------------------------------------------------------------
 # Coupler types, CNAB struct, constructor, and initialization routines
-# (moved from cnab.jl)
+# (moved out of the CNAB time-stepping files)
 # ---------------------------------------------------------------------------
 
 """
@@ -274,7 +273,8 @@ which is dispatched on `prob.formulation`:
     prescribed-velocity boundary buffer, and a velocity-space nonlinear history.
 
 Keeping them apart means neither formulation carries the other's (large) fields,
-and the time-stepping methods in `cnab.jl` dispatch on `prob.formulation` to
+and the time-stepping methods in the `cnab_*.jl` files dispatch on
+`prob.formulation` to
 select the matching pipeline.
 
 # Fields
